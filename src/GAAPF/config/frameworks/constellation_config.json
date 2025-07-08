@@ -1,0 +1,368 @@
+{
+    "guided_learning": {
+        "type": "guided_learning",
+        "description": "Focused on structured guidance for beginners",
+        "primary_agents": ["instructor", "mentor"],
+        "supporting_agents": ["documentation_expert", "motivational_coach"],
+        "optional_agents": ["practice_facilitator", "troubleshooter"],
+        "flow": [
+            "instructor >> mentor",
+            "mentor >> practice_facilitator",
+            "practice_facilitator >> troubleshooter",
+            "troubleshooter >> mentor"
+        ],
+        "agents": {
+            "instructor": {
+                "type": "instructor",
+                "role": "primary",
+                "config": {
+                    "explanation_depth": "detailed",
+                    "pace": "gradual"
+                }
+            },
+            "mentor": {
+                "type": "mentor",
+                "role": "primary",
+                "config": {
+                    "guidance_level": "high",
+                    "feedback_frequency": "frequent"
+                }
+            },
+            "documentation_expert": {
+                "type": "documentation_expert",
+                "role": "supporting",
+                "config": {
+                    "format": "simplified"
+                }
+            },
+            "motivational_coach": {
+                "type": "motivational_coach",
+                "role": "supporting",
+                "config": {
+                    "encouragement_level": "high"
+                }
+            },
+            "practice_facilitator": {
+                "type": "practice_facilitator",
+                "role": "optional",
+                "config": {
+                    "exercise_difficulty": "beginner"
+                }
+            },
+            "troubleshooter": {
+                "type": "troubleshooter",
+                "role": "optional",
+                "config": {
+                    "explanation_detail": "high"
+                }
+            }
+        }
+    },
+    "practice_focused": {
+        "type": "practice_focused",
+        "description": "Focused on hands-on practice and exercises",
+        "primary_agents": ["practice_facilitator", "code_assistant"],
+        "supporting_agents": ["troubleshooter", "assessment"],
+        "optional_agents": ["instructor", "mentor"],
+        "flow": [
+            "practice_facilitator >> code_assistant",
+            "code_assistant >> troubleshooter",
+            "troubleshooter >> assessment",
+            "assessment >> practice_facilitator"
+        ],
+        "agents": {
+            "practice_facilitator": {
+                "type": "practice_facilitator",
+                "role": "primary",
+                "config": {
+                    "exercise_difficulty": "adaptive",
+                    "exercise_variety": "high"
+                }
+            },
+            "code_assistant": {
+                "type": "code_assistant",
+                "role": "primary",
+                "config": {
+                    "code_examples": "comprehensive",
+                    "explanation_level": "detailed"
+                }
+            },
+            "troubleshooter": {
+                "type": "troubleshooter",
+                "role": "supporting",
+                "config": {
+                    "debug_approach": "guided"
+                }
+            },
+            "assessment": {
+                "type": "assessment",
+                "role": "supporting",
+                "config": {
+                    "feedback_detail": "high"
+                }
+            },
+            "instructor": {
+                "type": "instructor",
+                "role": "optional",
+                "config": {
+                    "explanation_depth": "as_needed"
+                }
+            },
+            "mentor": {
+                "type": "mentor",
+                "role": "optional",
+                "config": {
+                    "guidance_level": "medium"
+                }
+            }
+        }
+    },
+    "research_oriented": {
+        "type": "research_oriented",
+        "description": "Focused on deep exploration and research",
+        "primary_agents": ["research_assistant", "knowledge_synthesizer"],
+        "supporting_agents": ["documentation_expert", "instructor"],
+        "optional_agents": ["project_guide", "code_assistant"],
+        "flow": [
+            "research_assistant >> knowledge_synthesizer",
+            "knowledge_synthesizer >> documentation_expert",
+            "documentation_expert >> instructor",
+            "instructor >> research_assistant"
+        ],
+        "agents": {
+            "research_assistant": {
+                "type": "research_assistant",
+                "role": "primary",
+                "config": {
+                    "research_depth": "deep",
+                    "source_variety": "high"
+                }
+            },
+            "knowledge_synthesizer": {
+                "type": "knowledge_synthesizer",
+                "role": "primary",
+                "config": {
+                    "integration_level": "complex",
+                    "context_awareness": "high"
+                }
+            },
+            "documentation_expert": {
+                "type": "documentation_expert",
+                "role": "supporting",
+                "config": {
+                    "format": "comprehensive",
+                    "technical_level": "advanced"
+                }
+            },
+            "instructor": {
+                "type": "instructor",
+                "role": "supporting",
+                "config": {
+                    "explanation_depth": "advanced",
+                    "theoretical_focus": "high"
+                }
+            },
+            "project_guide": {
+                "type": "project_guide",
+                "role": "optional",
+                "config": {
+                    "project_complexity": "advanced"
+                }
+            },
+            "code_assistant": {
+                "type": "code_assistant",
+                "role": "optional",
+                "config": {
+                    "code_examples": "advanced",
+                    "explanation_level": "technical"
+                }
+            }
+        }
+    },
+    "assessment": {
+        "type": "assessment",
+        "description": "Focused on evaluation and feedback",
+        "primary_agents": ["assessment", "progress_tracker"],
+        "supporting_agents": ["mentor", "knowledge_synthesizer"],
+        "optional_agents": ["motivational_coach", "instructor"],
+        "flow": [
+            "assessment >> progress_tracker",
+            "progress_tracker >> knowledge_synthesizer",
+            "knowledge_synthesizer >> mentor",
+            "mentor >> assessment"
+        ],
+        "agents": {
+            "assessment": {
+                "type": "assessment",
+                "role": "primary",
+                "config": {
+                    "assessment_type": "comprehensive",
+                    "feedback_detail": "high"
+                }
+            },
+            "progress_tracker": {
+                "type": "progress_tracker",
+                "role": "primary",
+                "config": {
+                    "tracking_detail": "high",
+                    "visualization": "enabled"
+                }
+            },
+            "mentor": {
+                "type": "mentor",
+                "role": "supporting",
+                "config": {
+                    "guidance_level": "adaptive",
+                    "feedback_approach": "constructive"
+                }
+            },
+            "knowledge_synthesizer": {
+                "type": "knowledge_synthesizer",
+                "role": "supporting",
+                "config": {
+                    "gap_analysis": "enabled"
+                }
+            },
+            "motivational_coach": {
+                "type": "motivational_coach",
+                "role": "optional",
+                "config": {
+                    "encouragement_style": "achievement-focused"
+                }
+            },
+            "instructor": {
+                "type": "instructor",
+                "role": "optional",
+                "config": {
+                    "explanation_focus": "gaps"
+                }
+            }
+        }
+    },
+    "project_based": {
+        "type": "project_based",
+        "description": "Focused on project-based learning",
+        "primary_agents": ["project_guide", "code_assistant"],
+        "supporting_agents": ["troubleshooter", "documentation_expert"],
+        "optional_agents": ["research_assistant", "assessment"],
+        "flow": [
+            "project_guide >> code_assistant",
+            "code_assistant >> troubleshooter",
+            "troubleshooter >> documentation_expert",
+            "documentation_expert >> project_guide"
+        ],
+        "agents": {
+            "project_guide": {
+                "type": "project_guide",
+                "role": "primary",
+                "config": {
+                    "project_structure": "milestone-based",
+                    "guidance_style": "facilitative"
+                }
+            },
+            "code_assistant": {
+                "type": "code_assistant",
+                "role": "primary",
+                "config": {
+                    "code_examples": "project-specific",
+                    "implementation_focus": "high"
+                }
+            },
+            "troubleshooter": {
+                "type": "troubleshooter",
+                "role": "supporting",
+                "config": {
+                    "debug_approach": "comprehensive",
+                    "solution_variety": "high"
+                }
+            },
+            "documentation_expert": {
+                "type": "documentation_expert",
+                "role": "supporting",
+                "config": {
+                    "format": "project-relevant",
+                    "practical_focus": "high"
+                }
+            },
+            "research_assistant": {
+                "type": "research_assistant",
+                "role": "optional",
+                "config": {
+                    "research_focus": "implementation-oriented"
+                }
+            },
+            "assessment": {
+                "type": "assessment",
+                "role": "optional",
+                "config": {
+                    "assessment_type": "milestone-based"
+                }
+            }
+        }
+    },
+    "balanced_learning": {
+        "type": "balanced_learning",
+        "description": "Balanced approach with equal emphasis on theory and practice",
+        "primary_agents": ["instructor", "code_assistant"],
+        "supporting_agents": ["practice_facilitator", "documentation_expert"],
+        "optional_agents": ["assessment", "mentor"],
+        "flow": [
+            "instructor >> code_assistant",
+            "code_assistant >> practice_facilitator",
+            "practice_facilitator >> documentation_expert",
+            "documentation_expert >> assessment",
+            "assessment >> mentor",
+            "mentor >> instructor"
+        ],
+        "agents": {
+            "instructor": {
+                "type": "instructor",
+                "role": "primary",
+                "config": {
+                    "explanation_depth": "balanced",
+                    "pace": "moderate"
+                }
+            },
+            "code_assistant": {
+                "type": "code_assistant",
+                "role": "primary",
+                "config": {
+                    "code_examples": "progressive",
+                    "explanation_level": "balanced"
+                }
+            },
+            "practice_facilitator": {
+                "type": "practice_facilitator",
+                "role": "supporting",
+                "config": {
+                    "exercise_difficulty": "progressive",
+                    "exercise_variety": "balanced"
+                }
+            },
+            "documentation_expert": {
+                "type": "documentation_expert",
+                "role": "supporting",
+                "config": {
+                    "format": "balanced",
+                    "technical_level": "adaptive"
+                }
+            },
+            "assessment": {
+                "type": "assessment",
+                "role": "optional",
+                "config": {
+                    "assessment_type": "balanced",
+                    "feedback_detail": "moderate"
+                }
+            },
+            "mentor": {
+                "type": "mentor",
+                "role": "optional",
+                "config": {
+                    "guidance_level": "balanced",
+                    "feedback_frequency": "moderate"
+                }
+            }
+        }
+    }
+} 

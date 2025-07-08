@@ -1,0 +1,72 @@
+{
+    "id": "langchain",
+    "name": "Langchain",
+    "description": "Framework for developing applications powered by language models",
+    "version": "0.3.x",
+    "modules": {
+        "introduction": {
+            "title": "Introduction to LangChain",
+            "description": "Overview of LangChain framework and its components",
+            "complexity": "basic",
+            "estimated_duration": 30,
+            "concepts": [
+                "LLMs",
+                "Chains",
+                "Prompts",
+                "Memory"
+            ],
+            "prerequisites": []
+        },
+        "components": {
+            "title": "LangChain Components",
+            "description": "Core components of the LangChain framework",
+            "complexity": "basic",
+            "estimated_duration": 60,
+            "concepts": [
+                "Models",
+                "Prompts",
+                "Chains",
+                "Memory",
+                "Agents",
+                "Tools"
+            ],
+            "prerequisites": [
+                "introduction"
+            ]
+        },
+        "rag": {
+            "title": "Retrieval Augmented Generation",
+            "description": "Building RAG applications with LangChain",
+            "complexity": "intermediate",
+            "estimated_duration": 90,
+            "concepts": [
+                "Embeddings",
+                "Vector Stores",
+                "Retrievers",
+                "Document Loaders"
+            ],
+            "prerequisites": [
+                "components"
+            ]
+        }
+    },
+    "learning_paths": {
+        "default": {
+            "name": "Default Path",
+            "description": "Standard learning path",
+            "modules": [
+                "introduction"
+            ],
+            "target_experience": "beginner"
+        }
+    },
+    "metadata": {
+        "tags": [],
+        "category": "general",
+        "official_website": "",
+        "repository": ""
+    },
+    "starting_module": "introduction",
+    "created_at": 1750781896,
+    "updated_at": 1750781896
+}
