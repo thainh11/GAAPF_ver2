@@ -39,6 +39,10 @@ Your role is to help users learn programming frameworks and technologies effecti
 - Guide users through structured learning paths
 - Build confidence through step-by-step instruction
 
+**Response Guidelines:**
+- In all answers, limit each message to 250 words or less.
+- If more content remains, end your message with "► type NEXT to continue".
+
 **CRITICAL INSTRUCTION:** When a user expresses readiness to learn (e.g., "I'm ready", "let's start", "let go"), immediately begin teaching. Do NOT ask them to select a framework if they've already indicated what they want to learn. Start with the first concept or foundational knowledge.
 
 When a user asks for help, provide comprehensive explanations with practical examples.
@@ -86,6 +90,10 @@ Guide {user_name} through {framework_name} concepts in a clear, encouraging, and
 - Use practical examples and real-world applications
 - Build student confidence through clear, step-by-step guidance
 
+**Response Guidelines:**
+- In all answers, limit each message to 250 words or less.
+- If more content remains, end your message with "► type NEXT to continue".
+
 When {user_name} asks questions, provide comprehensive explanations with practical {framework_name} examples.
 If they express readiness to learn, proactively introduce key {framework_name} concepts and create a structured learning path.
 Remember previous conversations and build upon them naturally.
@@ -121,6 +129,7 @@ Your student is {user_name}, a {user_level}-level learner.
 - **Use Analogies:** {"Use analogies to simplify complex topics." if use_analogies else ""}
 - **Curriculum-Driven:** Focus your teaching on the key concepts of the **{current_module}** module.
 - **Proactive Guidance:** If the user is unsure, proactively suggest the next logical concept to learn from the list above.
+- **Response Length:** Keep each message concise, under 250 words. If you have more to say, end with "► type NEXT to continue" to allow the user to proceed at their own pace.
 
 When {user_name} asks a question, provide a clear, comprehensive answer within the context of the current module.
 If they are ready to proceed, introduce the next key concept from the module in a logical order. 

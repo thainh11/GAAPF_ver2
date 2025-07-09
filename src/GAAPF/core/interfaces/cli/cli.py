@@ -842,11 +842,16 @@ To get started with GAAPF, you need to configure at least one AI provider:
         # Initialize specialized agents
         self.agents = self._initialize_agents()
         
+        gcp_project = os.getenv("GOOGLE_CLOUD_PROJECT")
+        gcp_location = os.getenv("GOOGLE_CLOUD_LOCATION", "us-central1")
+
         # Initialize long-term memory
         self.long_term_memory = LongTermMemory(
             chroma_path=self.memory_path / 'chroma_db',
             collection_name="cli_sessions",
-            is_logging=self.is_logging
+            is_logging=self.is_logging,
+            project=gcp_project,
+            location=gcp_location
         )
     
     def _initialize_agents(self) -> Dict:
@@ -888,9 +893,9 @@ To get started with GAAPF, you need to configure at least one AI provider:
                 
                 for tool_name in common_tools:
                     try:
-                        if not GlobalToolRegistry().is_module_registered(f"GAAPF.core.tools.{tool_name}"):
+                        if not GlobalToolRegistry().is_module_registered(f"src.GAAPF.core.tools.{tool_name}"):
                             progress.update(tool_task, description=f"[cyan]⚡ Analyzing {tool_name}")
-                            temp_tool_manager.register_module_tool(tool_name, llm=self.llm)
+                            temp_tool_manager.register_module_tool(tool_name, llm=None)
                         else:
                             progress.update(tool_task, description=f"[cyan]✓ Using cached {tool_name}")
                         progress.advance(tool_task)
@@ -1412,6 +1417,12 @@ To get started with GAAPF, you need to configure at least one AI provider:
         framework_config = self.framework_manager.get_framework(framework_id)
         framework_name = framework_config.get("name", framework_id)
         
+        # ──────────────────────────────────────────────────────────────
+        # Accurate latency timer – start *before* we do any LLM/Hub work
+        # ──────────────────────────────────────────────────────────────
+        import time
+        overall_start = time.perf_counter()
+        
         # Get the first module to introduce it
         modules = framework_config.get("modules", {})
         first_module_key = next(iter(modules), "day1_fundamentals") if "day1_fundamentals" in modules else next(iter(modules), "introduction")
@@ -1517,8 +1528,6 @@ Are you ready to {'continue' if is_resumed else 'dive into'} our learning journe
                 safe_agent_type = str(agent_type).strip().lower().replace(' ', '_')
                 panel_title = f"[bold agent.{safe_agent_type}]{agent_emoji} {agent_name}[/bold agent.{safe_agent_type}]"
                 
-                import time
-                response_start = time.time()
                 try:
                     response_panel = Panel(
                         Markdown(response_content),
@@ -1531,9 +1540,11 @@ Are you ready to {'continue' if is_resumed else 'dive into'} our learning journe
                     self.console.print(f"[error]Panel rendering failed: {e}[/error]")
                     self.console.print(Markdown(response_content))
                 
-                response_end = time.time()
-                elapsed = response_end - response_start
-                self.console.print(f"[dim]⏱️ Agent response rendered in {elapsed:.3f} seconds.[/dim]")
+                # ──────────────────────────────────────────────────────────────
+                # Print *total* round-trip latency (proc + render)
+                # ──────────────────────────────────────────────────────────────
+                overall_elapsed = time.perf_counter() - overall_start
+                self.console.print(f"[dim]⏱️ Agent full response in {overall_elapsed:.3f} seconds.[/dim]")
                 
                 # The messages are already added to session by the learning hub
                 # No need to manually add them here
@@ -1562,6 +1573,10 @@ How can I assist you today?"""
     @async_debug_step
     async def process_user_message(self, message: str) -> None:
         """Process user message using the LearningHub with enhanced integration."""
+        # Start end-to-end timer *as soon as we receive the user message*
+        import time
+        overall_start = time.perf_counter()
+
         if not self.current_session:
             self.console.print("[bold red]No active session. Please start a new session.[/bold red]")
             return
@@ -1673,8 +1688,6 @@ How can I assist you today?"""
                     final_content = self._enhance_response_with_guidance(validated_content, constellation_info, is_declining_response)
                     
                     # --- Timing: measure response time ---
-                    import time
-                    response_start = time.time()
                     try:
                         response_panel = Panel(
                             Markdown(final_content),
@@ -1686,9 +1699,9 @@ How can I assist you today?"""
                     except Exception as e:
                         self.console.print(f"[error]Panel rendering failed: {e}[/error]")
                         self.console.print(Markdown(final_content))
-                    response_end = time.time()
-                    elapsed = response_end - response_start
-                    self.console.print(f"[dim]⏱️ Agent response rendered in {elapsed:.3f} seconds.[/dim]")
+                    # Show true end-to-end latency (Hub processing + render)
+                    total_elapsed = time.perf_counter() - overall_start
+                    self.console.print(f"[dim]⏱️ Agent full response in {total_elapsed:.3f} seconds.[/dim]")
                     
                     # Show curriculum status only for helpful learning responses
                     if constellation_info.get("curriculum_guided") and not is_declining_response:

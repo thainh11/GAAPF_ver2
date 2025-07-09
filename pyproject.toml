@@ -2,7 +2,6 @@
 name = "GAAPF"
 version = "0.1.0"
 description = "GAAPF - Guidance AI Agent for Python Framework Learning"
-authors = ["phamdinhkhanh <phamdinhkhanh.tkt53.neu@gmail.com>"]
 readme = "README.md"
 packages = [{include = "GAAPF", from = "src"}]
 

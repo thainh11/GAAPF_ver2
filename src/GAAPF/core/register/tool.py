@@ -284,19 +284,22 @@ Module:
         return tools
 
     def extract_tool(self, text: str) -> Optional[str]:
-        """Extract first valid JSON object from text"""
-        stack = []
-        start = text.find("{")
-        if start == -1:
-            return None
-
-        for i in range(start, len(text)):
-            if text[i] == "{":
-                stack.append("{")
-            elif text[i] == "}":
-                stack.pop()
-                if not stack:
-                    return text[start : i + 1]
+        """
+        Return the first valid JSON object that *contains* the key "tool_name".
+        Ignore brace pairs that are not valid JSON or are missing the key.
+        """
+        candidate = self._extract_json(text)
+        while candidate:
+            try:
+                obj = json.loads(candidate)
+                if "tool_name" in obj:
+                    return candidate
+            except json.JSONDecodeError:
+                pass 
+            next_start = text.find("{", text.find(candidate) + 1)
+            if next_start == -1:
+                break
+            candidate = self._extract_json(text[next_start:])
         return None
 
 
@@ -351,7 +354,7 @@ class FunctionTool:
                 artifact = await asyncio.to_thread(func, **arguments)
                 content = f"Completed executing function tool {tool_name}({arguments})"
                 logger.info(content)
-                tool_call_id = registered_functions[tool_name]["tool_call_id"]
+                tool_call_id = registered_functions.get(tool_name, {}).get("tool_call_id")
                 message = ToolMessage(
                     content=content, artifact=artifact, tool_call_id=tool_call_id
                 )
@@ -385,7 +388,7 @@ class MCPTool:
                 response = await session.call_tool(**payload)
                 content = f"Completed executing mcp tool {tool_name}({arguments})"
                 logger.info(content)
-                tool_call_id = registered_functions[tool_name]["tool_call_id"]
+                tool_call_id = registered_functions.get(tool_name, {}).get("tool_call_id")
                 artifact = response
                 message = ToolMessage(
                     content=content, artifact=artifact, tool_call_id=tool_call_id
@@ -417,7 +420,7 @@ class ModuleTool:
             artifact = await asyncio.to_thread(func, **arguments)
             content = f"Completed executing module tool {tool_name}({arguments})"
             logger.info(content)
-            tool_call_id = registered_functions[tool_name]["tool_call_id"]
+            tool_call_id = registered_functions.get(tool_name, {}).get("tool_call_id")
             message = ToolMessage(
                 content=content, artifact=artifact, tool_call_id=tool_call_id
             )

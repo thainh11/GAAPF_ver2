@@ -119,7 +119,11 @@ class Memory(MemoryMeta):
     def revert_object_mess(self, object: list[dict]):
         mess = []
         for line in object:
-            head, _, relation, relation_properties, tail, _ = list(line.values())
+            head = line.get('head', '')
+            relation = line.get('relation', '')
+            relation_properties = line.get('relation_properties', '')
+            tail = line.get('tail', '')
+            
             relation_additional= f"[{relation_properties}]" if relation_properties else ""
             mess.append(f"{head} -> {relation}{relation_additional} -> {tail}")
         mess = "\n".join(mess)
@@ -136,7 +140,13 @@ class Memory(MemoryMeta):
             
         if graph:
             for line in graph:
-                head, head_type, relation, relation_properties, tail, tail_type= list(line.values())
+                head = line.get('head')
+                head_type = line.get('head_type')
+                relation = line.get('relation')
+                relation_properties = line.get('relation_properties')
+                tail = line.get('tail')
+                tail_type = line.get('tail_type')
+                
                 lookup_hrt = (head, relation, tail)
                 lookup_hrttp = (head, relation, tail_type)
                 if lookup_hrt in index_memory:

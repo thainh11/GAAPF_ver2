@@ -245,7 +245,7 @@ class Agent(AgentMeta):
         success_count = 0
         for tool in tools:
             try:
-                self.tools_manager.register_module_tool(tool, llm=self.llm)
+                self.tools_manager.register_module_tool(tool, llm=None)
                 success_count += 1
                 if self.is_logging:
                     logger.info(f"✅ Registered tool: {tool}")
@@ -388,7 +388,7 @@ class Agent(AgentMeta):
             # Return safe fallback response
             return AIMessage(content="I apologize, but I encountered an error processing your request. Please try again.")
 
-    def stream(self, query: str, is_save_memory: bool = False, user_id: str = "unknown_user", learning_context: Dict = None, **kwargs) -> AsyncGenerator[Any, None]:
+    async def stream(self, query: str, is_save_memory: bool = False, user_id: str = "unknown_user", learning_context: Dict = None, **kwargs) -> AsyncGenerator[Any, None]:
         """
         Enhanced streaming with comprehensive error handling and logging.
         """
@@ -466,7 +466,8 @@ class Agent(AgentMeta):
                     if (tool_data_str is None) or (tool_data_str == "{}"):
                         if self.is_logging:
                             logger.info("✅ No tool call detected, returning direct response")
-                        return full_content
+                        yield full_content
+                        return
                     
                     # Parse and execute tool with enhanced error handling
                     try:
@@ -474,8 +475,7 @@ class Agent(AgentMeta):
                         if self.is_logging:
                             logger.info(f"🔧 Executing tool call: {tool_call.get('tool_name', 'unknown')}")
                             
-                        tool_message = asyncio.run(
-                            self.tools_manager._execute_tool(
+                        tool_message = await self.tools_manager._execute_tool(
                                 tool_name=tool_call.get("tool_name"),
                                 tool_type=tool_call.get("tool_type"),
                                 arguments=tool_call.get("arguments", {}),
@@ -483,7 +483,6 @@ class Agent(AgentMeta):
                                 mcp_client=self.mcp_client,
                                 mcp_server_name=self.mcp_server_name
                             )
-                        )
 
                         # Enhanced tool result processing
                         tool_result = getattr(tool_message, 'artifact', getattr(tool_message, 'content', str(tool_message)))

@@ -214,12 +214,15 @@ class InstructorAgent(SpecializedAgent):
         conversation_summary = ""
         if messages and len(messages) > 1:
             recent_messages = messages[-4:]  # Last 4 messages for context
-            conversation_summary = f"\nRecent conversation context:\n"
+            summary_parts = []
             for msg in recent_messages:
                 role = msg.get("role", "unknown")
                 content = msg.get("content", "")[:150]
-                conversation_summary += f"- {role}: {content}...\n"
-        
+                summary_parts.append(f"- {role}: {content}...")
+            
+            if summary_parts:
+                conversation_summary = "\\nRecent conversation context:\\n" + "\\n".join(summary_parts)
+
         # Enhanced context for instructors
         enhanced_query = f"""
 INSTRUCTOR CONTEXT:

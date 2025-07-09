@@ -20,6 +20,10 @@ def main():
         # Import the CLI main function from the correct package path
         from src.GAAPF.core.interfaces.cli.cli import main as cli_main
         
+        # Set asyncio policy for Windows to prevent event loop errors
+        if sys.platform == "win32":
+            asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
         # Run the modern CLI
         asyncio.run(cli_main())
         

@@ -29,7 +29,7 @@ class LongTermMemory(Memory):
                 memory_path: Optional[Union[Path, str]] = Path('templates/memory.json'),
                 chroma_path: Optional[Union[Path, str]] = Path('memory/chroma_db'),
                 collection_name: str = "long_term_memory",
-                embedding_model: str = "textembedding-gecko@latest",
+                embedding_model: str = "text-embedding-large-exp-03-07",
                 is_reset_memory: bool = False,
                 is_logging: bool = False,
                 project: str = None,

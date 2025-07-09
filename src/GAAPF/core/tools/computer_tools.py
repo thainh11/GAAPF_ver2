@@ -1,4 +1,5 @@
 import subprocess
+from pathlib import Path
 
 
 def run_bash_script(script_path: str, *args) -> str:
@@ -43,3 +44,9 @@ def run_bash_command(command: str) -> str:
         return result.stdout  # Return the standard output
     except subprocess.CalledProcessError as e:
         return f"Error: {e.stderr}"  # Return the error message if execution fails
+
+
+def write_file(path: str, content: str) -> str:
+    """Write content to path and return confirmation."""
+    Path(path).write_text(content, encoding="utf-8")
+    return f"Wrote {len(content)} characters to {path}"
