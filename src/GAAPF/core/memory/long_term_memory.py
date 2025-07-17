@@ -33,7 +33,7 @@ class LongTermMemory(Memory):
                 is_reset_memory: bool = False,
                 is_logging: bool = False,
                 project: str = None,
-                location: str = None,
+                location: str = "us-central1",
                 *args, **kwargs):
         """
         Initialize the long-term memory module.
@@ -273,4 +273,4 @@ class LongTermMemory(Memory):
             if self.is_logging:
                 logger.info(f"Added external knowledge for user {user_id} from source {source}")
         except Exception as e:
-            logger.error(f"Error adding external knowledge: {e}") 
+            logger.error(f"Error adding external knowledge: {e}")

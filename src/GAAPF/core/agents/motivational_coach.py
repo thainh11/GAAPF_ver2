@@ -7,7 +7,7 @@ from pathlib import Path
 from . import SpecializedAgent
 from langchain_core.language_models.base import BaseLanguageModel
 from langchain_core.tools import BaseTool
-from src.GAAPF.prompts.motivational_coach import generate_system_prompt
+from GAAPF.prompts.motivational_coach import generate_system_prompt
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -23,6 +23,17 @@ class MotivationalCoachAgent(SpecializedAgent):
     3. Celebrating progress and achievements
     4. Fostering a growth mindset and persistence
     """
+    
+    # Class attributes for agent registry support
+    DESCRIPTION = "Expert in providing learning encouragement and motivation"
+    CAPABILITIES = [
+        "motivation_support",
+        "positive_reinforcement",
+        "obstacle_assistance",
+        "progress_celebration",
+        "mindset_development"
+    ]
+    PRIORITY = 4  # Medium priority for motivational tasks
     
     def __init__(
         self,
@@ -163,4 +174,4 @@ class MotivationalCoachAgent(SpecializedAgent):
         elif "mindset" in content_lower or "attitude" in content_lower or "perspective" in content_lower:
             return "mindset_focused"
         else:
-            return "general_encouragement" 
+            return "general_encouragement"

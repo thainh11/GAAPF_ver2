@@ -5,7 +5,7 @@ from pathlib import Path
 from . import SpecializedAgent
 from langchain_core.language_models.base import BaseLanguageModel
 from langchain_core.tools import BaseTool
-from src.GAAPF.prompts.project_guide import generate_system_prompt
+from GAAPF.prompts.project_guide import generate_system_prompt
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -21,6 +21,17 @@ class ProjectGuideAgent(SpecializedAgent):
     3. Providing guidance during project implementation
     4. Suggesting enhancements and extensions to projects
     """
+    
+    # Class attributes for agent registry support
+    DESCRIPTION = "Expert in project-based learning"
+    CAPABILITIES = [
+        "project_design",
+        "step_breakdown",
+        "implementation_guidance",
+        "project_enhancement",
+        "practical_application"
+    ]
+    PRIORITY = 8  # High priority for project-based tasks
     
     def __init__(
         self,
@@ -289,4 +300,4 @@ class ProjectGuideAgent(SpecializedAgent):
         elif len(steps) > 5:
             return "intermediate"
         else:
-            return "beginner" 
+            return "beginner"

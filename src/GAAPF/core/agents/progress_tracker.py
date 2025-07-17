@@ -7,7 +7,7 @@ from pathlib import Path
 from . import SpecializedAgent
 from langchain_core.language_models.base import BaseLanguageModel
 from langchain_core.tools import BaseTool
-from src.GAAPF.prompts.progress_tracker import generate_system_prompt
+from GAAPF.prompts.progress_tracker import generate_system_prompt
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -23,6 +23,17 @@ class ProgressTrackerAgent(SpecializedAgent):
     3. Recommending next steps in the learning journey
     4. Providing insights on learning patterns and effectiveness
     """
+    
+    # Class attributes for agent registry support
+    DESCRIPTION = "Expert in monitoring learning progress"
+    CAPABILITIES = [
+        "progress_tracking",
+        "gap_analysis",
+        "learning_insights",
+        "next_step_recommendations",
+        "pattern_analysis"
+    ]
+    PRIORITY = 6  # Medium-high priority for progress tracking
     
     def __init__(
         self,
@@ -89,4 +100,4 @@ class ProgressTrackerAgent(SpecializedAgent):
         str
             System prompt for the agent
         """
-        return generate_system_prompt(self.config) 
+        return generate_system_prompt(self.config)

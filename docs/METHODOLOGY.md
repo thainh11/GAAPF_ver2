@@ -963,7 +963,7 @@ def _initialize_llm(self) -> BaseLanguageModel:
         if provider == "together" and os.environ.get("TOGETHER_API_KEY"):
             return ChatTogether(model="meta-llama/Llama-3-8b-chat-hf")
         elif provider == "google-genai" and os.environ.get("GOOGLE_API_KEY"):
-            return ChatGoogleGenerativeAI(model="gemini-1.5-flash")
+            return ChatGoogleGenerativeAI(model="gemini-2.5-flash")
 ```
 
 ## 13. Future Enhancement Pathways

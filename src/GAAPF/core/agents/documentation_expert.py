@@ -5,7 +5,7 @@ from pathlib import Path
 from . import SpecializedAgent
 from langchain_core.language_models.base import BaseLanguageModel
 from langchain_core.tools import BaseTool
-from src.GAAPF.prompts.documentation_expert import generate_system_prompt
+from GAAPF.prompts.documentation_expert import generate_system_prompt
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -21,6 +21,17 @@ class DocumentationExpertAgent(SpecializedAgent):
     3. Translating technical documentation into understandable explanations
     4. Guiding users through framework documentation resources
     """
+    
+    # Class attributes for agent registry support
+    DESCRIPTION = "Expert in documentation navigation and explanation"
+    CAPABILITIES = [
+        "documentation_search",
+        "content_explanation",
+        "technical_translation",
+        "resource_guidance",
+        "reference_finding"
+    ]
+    PRIORITY = 6  # Medium-high priority for documentation tasks
     
     def __init__(
         self,
@@ -192,4 +203,4 @@ class DocumentationExpertAgent(SpecializedAgent):
         elif "example" in content_lower or "sample" in content_lower:
             return "example"
         else:
-            return "general_documentation" 
+            return "general_documentation"

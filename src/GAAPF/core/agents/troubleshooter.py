@@ -5,7 +5,7 @@ from pathlib import Path
 from . import SpecializedAgent
 from langchain_core.language_models.base import BaseLanguageModel
 from langchain_core.tools import BaseTool
-from src.GAAPF.prompts.troubleshooter import generate_system_prompt
+from GAAPF.prompts.troubleshooter import generate_system_prompt
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -21,6 +21,17 @@ class TroubleshooterAgent(SpecializedAgent):
     3. Providing debugging strategies and techniques
     4. Helping users troubleshoot implementation issues
     """
+    
+    # Class attributes for agent registry support
+    DESCRIPTION = "Expert in error resolution and debugging"
+    CAPABILITIES = [
+        "error_diagnosis",
+        "debugging_assistance",
+        "issue_resolution",
+        "troubleshooting_guidance",
+        "error_prevention"
+    ]
+    PRIORITY = 9  # High priority for troubleshooting tasks
     
     def __init__(
         self,
@@ -274,4 +285,4 @@ class TroubleshooterAgent(SpecializedAgent):
         elif "network" in content_lower or "connection" in content_lower:
             return "network_error"
         else:
-            return "general_error" 
+            return "general_error"

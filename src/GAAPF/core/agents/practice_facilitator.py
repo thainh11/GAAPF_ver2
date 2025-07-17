@@ -5,7 +5,7 @@ from pathlib import Path
 from . import SpecializedAgent
 from langchain_core.language_models.base import BaseLanguageModel
 from langchain_core.tools import BaseTool
-from src.GAAPF.prompts.practice_facilitator import generate_system_prompt
+from GAAPF.prompts.practice_facilitator import generate_system_prompt
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -21,6 +21,17 @@ class PracticeFacilitatorAgent(SpecializedAgent):
     3. Providing hands-on activities to apply concepts
     4. Offering feedback on practice attempts
     """
+    
+    # Class attributes for agent registry support
+    DESCRIPTION = "Expert in creating exercises and practice activities"
+    CAPABILITIES = [
+        "exercise_creation",
+        "challenge_design",
+        "hands_on_activities",
+        "practice_feedback",
+        "difficulty_adaptation"
+    ]
+    PRIORITY = 7  # High priority for practice tasks
     
     def __init__(
         self,
@@ -233,4 +244,4 @@ As a practice facilitator, create appropriate exercises or provide guidance on p
         # Fall back to user's experience level
         user_profile = learning_context.get("user_profile", {})
         current_module = learning_context.get("current_module", "")
-        return user_profile.get("skill_level", {}).get(current_module, "beginner") 
+        return user_profile.get("skill_level", {}).get(current_module, "beginner")

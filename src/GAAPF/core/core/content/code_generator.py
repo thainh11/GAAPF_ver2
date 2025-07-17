@@ -7,6 +7,8 @@ with detailed explanations tailored to learning objectives.
 
 import asyncio
 import logging
+import os
+from pathlib import Path
 from typing import Dict, List, Any, Optional
 from datetime import datetime
 import json
@@ -15,6 +17,7 @@ import re
 from langchain_core.language_models.base import BaseLanguageModel
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
+from ...memory.long_term_memory import LongTermMemory
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +32,7 @@ class CodeGenerator:
     - Interactive exercises
     """
     
-    def __init__(self, llm: BaseLanguageModel, framework_collector=None, is_logging: bool = False):
+    def __init__(self, llm: BaseLanguageModel, framework_collector=None, long_term_memory: LongTermMemory = None, is_logging: bool = False):
         """
         Initialize the code generator.
         
@@ -39,11 +42,14 @@ class CodeGenerator:
             Language model for code generation
         framework_collector : FrameworkCollector, optional
             Framework-specific information collector
+        long_term_memory : LongTermMemory, optional
+            Long-term memory for database content validation
         is_logging : bool
             Enable detailed logging
         """
         self.llm = llm
         self.framework_collector = framework_collector
+        self.long_term_memory = long_term_memory
         self.is_logging = is_logging
         
         # Code templates by learning level
@@ -63,6 +69,231 @@ class CodeGenerator:
         
         if self.is_logging:
             logger.info("CodeGenerator initialized")
+    
+    def suggest_file_path(self, concept: str, framework_name: str, language: str, file_type: str = "main") -> str:
+        """
+        Suggest an exact file path for generated code based on framework conventions.
+        
+        Parameters:
+        ----------
+        concept : str
+            The concept being implemented
+        framework_name : str
+            Target framework
+        language : str
+            Programming language
+        file_type : str
+            Type of file (main, test, config, etc.)
+            
+        Returns:
+        -------
+        str
+            Suggested file path
+        """
+        try:
+            # Normalize concept name for file naming
+            concept_name = re.sub(r'[^a-zA-Z0-9_]', '_', concept.lower())
+            framework_lower = framework_name.lower()
+            
+            # Framework-specific path suggestions
+            if "django" in framework_lower:
+                if file_type == "main":
+                    return f"myproject/myapp/{concept_name}.py"
+                elif file_type == "test":
+                    return f"myproject/myapp/tests/test_{concept_name}.py"
+                elif file_type == "model":
+                    return f"myproject/myapp/models/{concept_name}.py"
+                elif file_type == "view":
+                    return f"myproject/myapp/views/{concept_name}.py"
+            
+            elif "flask" in framework_lower:
+                if file_type == "main":
+                    return f"app/{concept_name}.py"
+                elif file_type == "test":
+                    return f"tests/test_{concept_name}.py"
+                elif file_type == "route":
+                    return f"app/routes/{concept_name}.py"
+            
+            elif "react" in framework_lower:
+                if file_type == "main":
+                    return f"src/components/{concept_name.title()}.jsx"
+                elif file_type == "test":
+                    return f"src/components/__tests__/{concept_name.title()}.test.jsx"
+                elif file_type == "style":
+                    return f"src/components/{concept_name.title()}.css"
+            
+            elif "vue" in framework_lower:
+                if file_type == "main":
+                    return f"src/components/{concept_name.title()}.vue"
+                elif file_type == "test":
+                    return f"tests/unit/{concept_name}.spec.js"
+            
+            elif "spring" in framework_lower:
+                if file_type == "main":
+                    return f"src/main/java/com/example/{concept_name.title()}.java"
+                elif file_type == "test":
+                    return f"src/test/java/com/example/{concept_name.title()}Test.java"
+            
+            # Default path suggestions by language
+            if language == "python":
+                return f"src/{concept_name}.py" if file_type == "main" else f"tests/test_{concept_name}.py"
+            elif language == "javascript":
+                return f"src/{concept_name}.js" if file_type == "main" else f"tests/{concept_name}.test.js"
+            elif language == "java":
+                return f"src/main/java/{concept_name.title()}.java" if file_type == "main" else f"src/test/java/{concept_name.title()}Test.java"
+            elif language == "csharp":
+                return f"src/{concept_name.title()}.cs" if file_type == "main" else f"tests/{concept_name.title()}Test.cs"
+            
+            # Fallback
+            return f"{concept_name}.{self._get_file_extension(language)}"
+            
+        except Exception as e:
+            logger.error(f"Error suggesting file path: {str(e)}")
+            return f"{concept}.{self._get_file_extension(language)}"
+    
+    def _get_file_extension(self, language: str) -> str:
+        """Get file extension for a programming language."""
+        extensions = {
+            "python": "py",
+            "javascript": "js",
+            "java": "java",
+            "csharp": "cs"
+        }
+        return extensions.get(language, "txt")
+    
+    async def validate_code_against_database(self, concept: str, framework_name: str, code_content: Dict[str, Any], user_id: str = None) -> Dict[str, Any]:
+        """
+        Validate generated code content against stored knowledge in the database.
+        
+        Parameters:
+        ----------
+        concept : str
+            The concept being implemented
+        framework_name : str
+            Target framework
+        code_content : Dict[str, Any]
+            Generated code content to validate
+        user_id : str, optional
+            User ID for personalized validation
+            
+        Returns:
+        -------
+        Dict[str, Any]
+            Validation results with suggestions
+        """
+        if not self.long_term_memory:
+            return {
+                "validated": True,
+                "suggestions": [],
+                "similar_patterns": [],
+                "confidence": 0.5,
+                "message": "No database validation available"
+            }
+        
+        try:
+            # Query similar memories for the concept and framework
+            query_text = f"{concept} {framework_name} code example implementation"
+            similar_memories = self.long_term_memory.query_similar_memories(
+                query=query_text,
+                user_id=user_id,
+                n_results=5,
+                framework_id=framework_name
+            )
+            
+            # Extract patterns from similar memories
+            patterns = []
+            suggestions = []
+            
+            for memory in similar_memories:
+                memory_text = memory.get('text', '')
+                distance = memory.get('distance', 1.0)
+                
+                # If memory is very similar (low distance), extract patterns
+                if distance < 0.3:
+                    patterns.append({
+                        "pattern": memory_text,
+                        "similarity": 1 - distance,
+                        "source": "database_memory"
+                    })
+                
+                # Generate suggestions based on memory content
+                if distance < 0.5:
+                    suggestions.append(f"Consider pattern from previous implementation: {memory_text[:100]}...")
+            
+            # Validate code structure against known patterns
+            main_code = code_content.get('main_code', '')
+            validation_score = self._calculate_validation_score(main_code, patterns)
+            
+            # Generate framework-specific suggestions
+            framework_suggestions = await self._get_framework_specific_suggestions(
+                concept, framework_name, code_content, similar_memories
+            )
+            
+            suggestions.extend(framework_suggestions)
+            
+            return {
+                "validated": validation_score > 0.6,
+                "suggestions": suggestions[:5],  # Limit to top 5 suggestions
+                "similar_patterns": patterns[:3],  # Limit to top 3 patterns
+                "confidence": validation_score,
+                "message": f"Validation completed with {len(similar_memories)} similar memories found"
+            }
+            
+        except Exception as e:
+            logger.error(f"Error validating code against database: {str(e)}")
+            return {
+                "validated": False,
+                "suggestions": ["Database validation failed - proceeding with basic validation"],
+                "similar_patterns": [],
+                "confidence": 0.0,
+                "message": f"Validation error: {str(e)}"
+            }
+    
+    def _calculate_validation_score(self, code: str, patterns: List[Dict]) -> float:
+        """
+        Calculate validation score based on similarity to known patterns.
+        """
+        if not patterns:
+            return 0.5  # Neutral score when no patterns available
+        
+        # Simple scoring based on pattern similarity
+        total_similarity = sum(pattern.get('similarity', 0) for pattern in patterns)
+        avg_similarity = total_similarity / len(patterns)
+        
+        # Boost score if code contains common framework keywords
+        keyword_boost = 0
+        common_keywords = ['import', 'class', 'def', 'function', 'const', 'var', 'let']
+        for keyword in common_keywords:
+            if keyword in code.lower():
+                keyword_boost += 0.1
+        
+        return min(avg_similarity + keyword_boost, 1.0)
+    
+    async def _get_framework_specific_suggestions(self, concept: str, framework_name: str, code_content: Dict, memories: List) -> List[str]:
+        """
+        Generate framework-specific suggestions based on memories and best practices.
+        """
+        suggestions = []
+        framework_lower = framework_name.lower()
+        
+        # Django-specific suggestions
+        if "django" in framework_lower:
+            if "model" in concept.lower() and "class" not in code_content.get('main_code', ''):
+                suggestions.append("Consider using Django Model class for database operations")
+            if "view" in concept.lower() and "request" not in code_content.get('main_code', ''):
+                suggestions.append("Django views should typically handle request objects")
+        
+        # Flask-specific suggestions
+        elif "flask" in framework_lower:
+            if "route" in concept.lower() and "@app.route" not in code_content.get('main_code', ''):
+                suggestions.append("Flask routes should use @app.route decorator")
+        
+        # React-specific suggestions
+        elif "react" in framework_lower:
+            if "component" in concept.lower() and "return" not in code_content.get('main_code', ''):
+                suggestions.append("React components should return JSX elements")
+        
+        return suggestions
     
     async def generate_code_example(
         self,
@@ -132,12 +363,22 @@ class CodeGenerator:
                 concept, framework_name, validated_code, learning_level
             )
             
+            # Suggest file path for the generated code
+            suggested_path = self.suggest_file_path(concept, framework_name, language)
+            
+            # Validate code against database if memory is available
+            validation_result = await self.validate_code_against_database(
+                concept, framework_name, validated_code
+            )
+            
             result = {
                 "concept": concept,
                 "framework_name": framework_name,
                 "language": language,
                 "code_content": validated_code,
                 "exercises": exercises,
+                "suggested_file_path": suggested_path,
+                "validation": validation_result,
                 "metadata": {
                     "learning_level": learning_level,
                     "example_type": example_type,
@@ -1001,4 +1242,4 @@ class CodeGenerator:
                 "complexity": "advanced"
             }}
             """
-        ) 
+        )

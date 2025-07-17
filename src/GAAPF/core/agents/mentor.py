@@ -5,7 +5,7 @@ from pathlib import Path
 from . import SpecializedAgent
 from langchain_core.language_models.base import BaseLanguageModel
 from langchain_core.tools import BaseTool
-from src.GAAPF.prompts.mentor import generate_system_prompt
+from GAAPF.prompts.mentor import generate_system_prompt
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -21,6 +21,17 @@ class MentorAgent(SpecializedAgent):
     3. Helping users overcome learning challenges
     4. Suggesting learning paths and next steps
     """
+    
+    # Class attributes for agent registry support
+    DESCRIPTION = "Expert in providing learning guidance and support"
+    CAPABILITIES = [
+        "learning_guidance",
+        "motivation_support",
+        "challenge_assistance",
+        "path_recommendation",
+        "personalized_advice"
+    ]
+    PRIORITY = 5  # Medium priority for mentoring tasks
     
     def __init__(
         self,
@@ -198,4 +209,4 @@ class MentorAgent(SpecializedAgent):
         ]
         
         content_lower = response_content.lower()
-        return any(keyword in content_lower for keyword in motivational_keywords) 
+        return any(keyword in content_lower for keyword in motivational_keywords)

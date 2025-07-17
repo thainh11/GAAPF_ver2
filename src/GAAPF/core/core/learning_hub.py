@@ -258,6 +258,15 @@ class LearningHub:
         # Save session to persistent storage
         self.session_manager.save_session_state(learning_context)
         
+        # Update user profile with session info
+        self.user_profile_manager.update_profile(
+            user_id,
+            {
+                "last_session": session_id,
+                "last_session_time": int(time.time())
+            }
+        )
+        
         # Log session start
         if self.is_logging:
             logger.info(f"Started new session {session_id} for user {user_id} with framework {framework_id}")
@@ -345,6 +354,16 @@ class LearningHub:
         # Store session and constellation in active memory
         self.active_sessions[session_id] = session_data
         self.active_constellations[session_id] = constellation
+        
+        # Update user profile with session info
+        session_id = session_data["session_id"]
+        self.user_profile_manager.update_profile(
+            user_id,
+            {
+                "last_session": session_id,
+                "last_session_time": int(time.time())
+            }
+        )
         
         # Log session resume
         if self.is_logging:
@@ -525,6 +544,16 @@ class LearningHub:
             learning_context=enhanced_context,
             interaction_data=interaction_data,
             response=response
+        )
+        
+        # FIX: Update user profile with current session info after each interaction
+        # This ensures the "Last Session" status is properly updated
+        self.user_profile_manager.update_profile(
+            enhanced_context["user_id"],
+            {
+                "last_session": session_id,
+                "last_session_time": int(time.time())
+            }
         )
         
         if self.is_logging:
@@ -829,77 +858,266 @@ class LearningHub:
         return formatted_response
     
     def _generate_contextual_learning_guidance(self, enhanced_context: Dict, response: Dict) -> Dict:
-        """Generate contextual learning guidance based on session state."""
+        """Generate enhanced contextual learning guidance based on session state and user behavior."""
         guidance = {}
         
-        # Analyze learning stage and provide appropriate guidance
+        # Extract context information
         learning_stage = enhanced_context.get("learning_stage", "exploration")
         interaction_count = enhanced_context.get("interaction_count", 0)
         current_module = enhanced_context.get("current_module", "")
+        user_profile = enhanced_context.get("user_profile", {})
+        user_level = user_profile.get("experience_level", "beginner")
+        conversation_analysis = enhanced_context.get("conversation_analysis", {})
+        learning_insights = enhanced_context.get("learning_insights", {})
         
-        # Generate next steps based on learning stage
-        next_steps = []
-        learning_tips = []
+        # Analyze conversation patterns for personalized guidance
+        conversation_depth = conversation_analysis.get("conversation_depth", "surface")
+        learning_momentum = conversation_analysis.get("learning_momentum", "starting")
+        recent_topics = conversation_analysis.get("recent_interaction_topics", [])
+        engagement_pattern = learning_insights.get("engagement_pattern", "just_starting")
         
-        if learning_stage == "exploration" and interaction_count < 5:
-            next_steps = [
-                "Ask questions about concepts you'd like to understand better",
-                "Request examples or code demonstrations",
-                "Explore the framework's core features"
-            ]
-            learning_tips = [
-                "Don't hesitate to ask for clarification on any topic",
-                "Examples often help make abstract concepts concrete"
-            ]
-        elif learning_stage == "concept" or (interaction_count >= 5 and interaction_count < 15):
-            next_steps = [
-                "Try implementing the concepts we've discussed",
-                "Ask for hands-on practice exercises",
-                "Request code examples for specific use cases"
-            ]
-            learning_tips = [
-                "Practice is key to understanding - try coding along",
-                "Don't worry about making mistakes, they're part of learning"
-            ]
-        elif learning_stage == "practice" or interaction_count >= 15:
-            next_steps = [
-                "Work on a complete project using what you've learned",
-                "Ask for code review and optimization suggestions",
-                "Explore advanced features and best practices"
-            ]
-            learning_tips = [
-                "Apply your knowledge to real-world problems",
-                "Consider performance and maintainability in your code"
-            ]
+        # Generate adaptive next steps based on multiple factors
+        next_steps = self._generate_adaptive_next_steps(
+            learning_stage, interaction_count, user_level, 
+            conversation_depth, learning_momentum, engagement_pattern
+        )
         
-        # Add module-specific guidance if available
-        if current_module and current_module != "introduction":
-            module_info = enhanced_context.get("current_module_info", {})
-            if module_info:
-                concepts = module_info.get("concepts", [])
-                if concepts:
-                    guidance["module_focus"] = f"Focus on mastering: {', '.join(concepts[:3])}"
+        # Generate personalized learning tips
+        learning_tips = self._generate_personalized_tips(
+            user_level, learning_stage, conversation_depth, recent_topics
+        )
         
-        # Add progress encouragement
-        progress_note = ""
-        if interaction_count == 0:
-            progress_note = "Welcome! Let's start your learning journey."
-        elif interaction_count < 5:
-            progress_note = "Great start! You're exploring the fundamentals."
-        elif interaction_count < 15:
-            progress_note = "Excellent progress! You're building solid understanding."
-        else:
-            progress_note = "Outstanding! You're developing advanced skills."
+        # Add module-specific guidance with enhanced context
+        module_guidance = self._generate_module_guidance(
+            current_module, enhanced_context, interaction_count
+        )
+        
+        # Generate progress encouragement with personalization
+        progress_note = self._generate_progress_encouragement(
+            interaction_count, learning_stage, engagement_pattern, user_level
+        )
+        
+        # Determine optimal learning path recommendations
+        learning_path = self._suggest_learning_path(
+            learning_stage, interaction_count, user_level, conversation_analysis
+        )
+        
+        # Add readiness assessment for stage transitions
+        readiness_assessment = self._assess_learning_readiness(
+            enhanced_context, conversation_analysis
+        )
         
         guidance.update({
             "next_steps": next_steps,
             "learning_tips": learning_tips,
             "progress_note": progress_note,
             "learning_stage": learning_stage,
-            "session_depth": "deep" if interaction_count > 10 else "medium" if interaction_count > 5 else "surface"
+            "session_depth": conversation_depth,
+            "learning_momentum": learning_momentum,
+            "engagement_level": engagement_pattern,
+            "module_guidance": module_guidance,
+            "learning_path": learning_path,
+            "readiness_assessment": readiness_assessment,
+            "personalization": {
+                "user_level": user_level,
+                "interaction_count": interaction_count,
+                "recent_focus": recent_topics[:3] if recent_topics else []
+            }
         })
         
         return guidance
+    
+    def _generate_adaptive_next_steps(self, learning_stage: str, interaction_count: int, 
+                                     user_level: str, conversation_depth: str, 
+                                     learning_momentum: str, engagement_pattern: str) -> List[str]:
+        """Generate adaptive next steps based on multiple learning factors."""
+        next_steps = []
+        
+        # Base steps by learning stage
+        if learning_stage == "exploration":
+            if user_level == "beginner":
+                next_steps.extend([
+                    "Ask about fundamental concepts and terminology",
+                    "Request simple examples to build understanding",
+                    "Explore basic features step-by-step"
+                ])
+            else:
+                next_steps.extend([
+                    "Dive into advanced concepts and architecture",
+                    "Compare with frameworks you already know",
+                    "Explore unique features and capabilities"
+                ])
+        
+        elif learning_stage == "concept":
+            if conversation_depth == "deep":
+                next_steps.extend([
+                    "Apply concepts in practical scenarios",
+                    "Explore edge cases and advanced patterns",
+                    "Connect concepts to real-world applications"
+                ])
+            else:
+                next_steps.extend([
+                    "Ask for detailed explanations of key concepts",
+                    "Request examples that demonstrate the concepts",
+                    "Clarify any confusing aspects"
+                ])
+        
+        elif learning_stage == "practice":
+            if engagement_pattern == "highly_engaged":
+                next_steps.extend([
+                    "Take on challenging implementation projects",
+                    "Optimize and refactor existing code",
+                    "Explore advanced patterns and best practices"
+                ])
+            else:
+                next_steps.extend([
+                    "Start with guided coding exercises",
+                    "Practice with step-by-step tutorials",
+                    "Build confidence with smaller tasks"
+                ])
+        
+        # Adjust based on momentum
+        if learning_momentum == "high" and interaction_count > 10:
+            next_steps.append("Consider moving to more advanced topics")
+        elif learning_momentum == "low":
+            next_steps.append("Take time to review and consolidate your understanding")
+        
+        return next_steps[:4]  # Limit to 4 most relevant steps
+    
+    def _generate_personalized_tips(self, user_level: str, learning_stage: str, 
+                                   conversation_depth: str, recent_topics: List[str]) -> List[str]:
+        """Generate personalized learning tips based on user context."""
+        tips = []
+        
+        # Level-specific tips
+        if user_level == "beginner":
+            tips.extend([
+                "Take your time to understand each concept thoroughly",
+                "Don't hesitate to ask for simpler explanations",
+                "Practice with small examples before tackling larger projects"
+            ])
+        elif user_level == "intermediate":
+            tips.extend([
+                "Connect new concepts to your existing knowledge",
+                "Focus on understanding the 'why' behind patterns",
+                "Experiment with variations of examples"
+            ])
+        else:  # advanced
+            tips.extend([
+                "Consider architectural implications and trade-offs",
+                "Explore performance optimization opportunities",
+                "Think about scalability and maintainability"
+            ])
+        
+        # Stage-specific tips
+        if learning_stage == "exploration" and conversation_depth == "surface":
+            tips.append("Ask follow-up questions to deepen your understanding")
+        elif learning_stage == "practice":
+            tips.append("Learn from mistakes - they're valuable learning opportunities")
+        
+        # Topic-specific tips
+        if recent_topics:
+            tips.append(f"Consider how {recent_topics[0]} relates to other concepts you've learned")
+        
+        return tips[:3]  # Limit to 3 most relevant tips
+    
+    def _generate_module_guidance(self, current_module: str, enhanced_context: Dict, 
+                                 interaction_count: int) -> Dict:
+        """Generate enhanced module-specific guidance."""
+        guidance = {}
+        
+        if not current_module or current_module == "introduction":
+            return guidance
+        
+        module_info = enhanced_context.get("current_module_info", {})
+        if module_info:
+            concepts = module_info.get("concepts", [])
+            objectives = module_info.get("objectives", [])
+            
+            if concepts:
+                guidance["key_concepts"] = concepts[:3]
+                guidance["focus_suggestion"] = f"Focus on mastering: {', '.join(concepts[:2])}"
+            
+            if objectives:
+                guidance["learning_objectives"] = objectives[:2]
+            
+            # Progress within module
+            module_progress = enhanced_context.get("progress_metrics", {}).get("current_module_progress", 0)
+            if module_progress > 0:
+                guidance["module_progress"] = f"{module_progress:.0%} complete"
+                
+                if module_progress < 0.3:
+                    guidance["stage_suggestion"] = "Continue exploring the fundamentals"
+                elif module_progress < 0.7:
+                    guidance["stage_suggestion"] = "Ready for hands-on practice"
+                else:
+                    guidance["stage_suggestion"] = "Consider moving to the next module"
+        
+        return guidance
+    
+    def _generate_progress_encouragement(self, interaction_count: int, learning_stage: str, 
+                                       engagement_pattern: str, user_level: str) -> str:
+        """Generate personalized progress encouragement."""
+        if interaction_count == 0:
+            return f"Welcome! As a {user_level} learner, you're about to embark on an exciting journey."
+        
+        # Base encouragement on engagement and progress
+        if engagement_pattern == "highly_engaged":
+            if interaction_count > 15:
+                return "Outstanding dedication! Your deep engagement is building strong expertise."
+            else:
+                return "Excellent engagement! You're making rapid progress."
+        elif engagement_pattern == "moderately_engaged":
+            return "Great steady progress! You're building solid understanding."
+        else:
+            return "Good start! Every question and interaction builds your knowledge."
+    
+    def _suggest_learning_path(self, learning_stage: str, interaction_count: int, 
+                              user_level: str, conversation_analysis: Dict) -> Dict:
+        """Suggest optimal learning path based on current context."""
+        path = {}
+        
+        # Determine next recommended stage
+        if learning_stage == "exploration" and interaction_count >= 5:
+            path["next_stage"] = "concept"
+            path["transition_suggestion"] = "Ready to dive deeper into core concepts"
+        elif learning_stage == "concept" and interaction_count >= 10:
+            path["next_stage"] = "practice"
+            path["transition_suggestion"] = "Time for hands-on implementation"
+        elif learning_stage == "practice" and interaction_count >= 15:
+            path["next_stage"] = "assessment"
+            path["transition_suggestion"] = "Ready to test your knowledge"
+        
+        # Suggest learning activities
+        conversation_depth = conversation_analysis.get("conversation_depth", "surface")
+        if conversation_depth == "surface":
+            path["recommended_activity"] = "Ask more detailed questions to deepen understanding"
+        elif conversation_depth == "deep":
+            path["recommended_activity"] = "Apply your knowledge in practical exercises"
+        
+        return path
+    
+    def _assess_learning_readiness(self, enhanced_context: Dict, conversation_analysis: Dict) -> Dict:
+        """Assess readiness for various learning activities."""
+        assessment = {}
+        
+        interaction_count = enhanced_context.get("interaction_count", 0)
+        learning_stage = enhanced_context.get("learning_stage", "exploration")
+        conversation_depth = conversation_analysis.get("conversation_depth", "surface")
+        
+        # Readiness for stage progression
+        if learning_stage == "exploration" and interaction_count >= 3:
+            assessment["concept_readiness"] = conversation_depth in ["medium", "deep"]
+        elif learning_stage == "concept" and interaction_count >= 8:
+            assessment["practice_readiness"] = conversation_depth == "deep"
+        elif learning_stage == "practice" and interaction_count >= 12:
+            assessment["assessment_readiness"] = True
+        
+        # Readiness for advanced topics
+        if interaction_count > 10 and conversation_depth == "deep":
+            assessment["advanced_topics_readiness"] = True
+        
+        return assessment
     
     def end_session(self, session_id: str) -> Dict:
         """

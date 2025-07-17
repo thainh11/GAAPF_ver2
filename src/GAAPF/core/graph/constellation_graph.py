@@ -8,8 +8,10 @@ agent handoffs and coordination within a constellation.
 import logging
 from typing import Dict, List, Optional, Any, Annotated, TypedDict
 import copy
+import asyncio
 
 from ..agents import SpecializedAgent
+from ..utils.async_helpers import run_sync
 from .graph import Graph
 from .node import Node
 from .operator import FlowStateGraph, END, START
@@ -267,18 +269,23 @@ class ConstellationGraph:
             
             try:
                 # Check if agent is properly initialized
-                if not agent or not hasattr(agent, 'invoke'):
+                if not agent or not hasattr(agent, 'ainvoke'):
                     raise AttributeError(f"Agent {agent_type} is not properly initialized")
                 
                 # Use the agent to process the query
                 query = interaction_data.get("query", "")
                 
                 # ---- pass the ORIGINAL user query; the agent will build its own context ----
-                response = agent.invoke(
-                    query, 
-                    is_save_memory=True,
-                    user_id=user_id, 
-                    learning_context=learning_context
+                # Check if memory should be disabled for this request
+                save_memory = not learning_context.get("disable_memory", False)
+                
+                response = run_sync(
+                    agent.ainvoke(
+                        query,
+                        is_save_memory=save_memory,
+                        user_id=user_id,
+                        learning_context=learning_context,
+                    )
                 )
                 
                 # Extract and enhance response content
@@ -571,7 +578,13 @@ class ConstellationGraph:
             query = interaction_data.get("query", "")
             
             # Simple agent processing (invoke with query)
-            response = agent.invoke(query, user_id=user_id)
+            response = run_sync(
+                agent.ainvoke(
+                    query,
+                    user_id=user_id,
+                    learning_context=learning_context,
+                )
+            )
             
             # Store agent response
             input_data["agent_responses"][current_agent] = {
@@ -700,4 +713,4 @@ What would you like to learn about today?"""
             enhanced_content = content + "\n\n---\n\n" + "\n\n".join(guidance_notes)
             return enhanced_content
         
-        return content 
+        return content

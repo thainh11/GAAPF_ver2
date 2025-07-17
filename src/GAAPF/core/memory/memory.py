@@ -132,20 +132,27 @@ class Memory(MemoryMeta):
     def update_memory(self, graph: list, user_id: str):
         memory_about_user = self.load_memory(load_type='list', user_id=user_id)
         if memory_about_user:
-            index_memory = [(item['head'], item['relation'], item['tail']) for item in memory_about_user]
-            index_memory_head_relation_tail_type = [(item['head'], item['relation'],  item['tail_type']) for item in memory_about_user]
+            # Add safety checks for missing keys
+            index_memory = [(item.get('head', ''), item.get('relation', ''), item.get('tail', '')) for item in memory_about_user if all(key in item for key in ['head', 'relation', 'tail'])]
+            index_memory_head_relation_tail_type = [(item.get('head', ''), item.get('relation', ''), item.get('tail_type', '')) for item in memory_about_user if all(key in item for key in ['head', 'relation', 'tail_type'])]
         else:
             index_memory = []
             index_memory_head_relation_tail_type = []
             
         if graph:
             for line in graph:
+                # Skip items that don't have required keys
+                if not all(key in line for key in ['head', 'relation']):
+                    if self.is_logging:
+                        logger.warning(f"Skipping incomplete graph item: {line}")
+                    continue
+                    
                 head = line.get('head')
                 head_type = line.get('head_type')
                 relation = line.get('relation')
                 relation_properties = line.get('relation_properties')
-                tail = line.get('tail')
-                tail_type = line.get('tail_type')
+                tail = line.get('tail', '')  # Default to empty string if missing
+                tail_type = line.get('tail_type', '')
                 
                 lookup_hrt = (head, relation, tail)
                 lookup_hrttp = (head, relation, tail_type)

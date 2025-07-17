@@ -8,7 +8,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import BaseTool
 from ..graph.function_graph import node, NodeWrapper
 from langgraph.graph import END
-from src.GAAPF.prompts.instructor import generate_system_prompt
+from GAAPF.prompts.instructor import generate_system_prompt
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -33,6 +33,18 @@ class InstructorAgent(SpecializedAgent):
     7. Providing proactive guidance and next steps
     8. Maintaining conversation continuity and context
     """
+    
+    # Class attributes for agent registry
+    DESCRIPTION = "Expert in providing clear explanations and structured learning with proactive guidance"
+    CAPABILITIES = [
+        "concept_explanation",
+        "theoretical_background",
+        "structured_learning",
+        "proactive_guidance",
+        "curriculum_driven_teaching",
+        "adaptive_explanations"
+    ]
+    PRIORITY = 10  # High priority for instructional tasks
     
     def __init__(
         self,
@@ -78,7 +90,8 @@ class InstructorAgent(SpecializedAgent):
         if not tools:
             tools = [
                 "websearch_tools",
-                "deepsearch"
+                "deepsearch",
+                "computer_tools"  # FIX: Add computer_tools for file creation capabilities
             ]
         
         # Define flow
@@ -417,4 +430,4 @@ RESPONSE REQUIREMENTS:
         if self.is_logging:
             logger.info("✅ Enhanced proactive guidance added to response")
             
-        return content + guidance_section 
+        return content + guidance_section

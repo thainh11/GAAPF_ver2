@@ -27,6 +27,11 @@ class SpecializedAgent(Agent):
     for educational and learning contexts.
     """
     
+    # Class attributes for agent registry support
+    DESCRIPTION = "Base specialized learning agent"
+    CAPABILITIES = ["learning_support", "educational_guidance"]
+    PRIORITY = 0  # Default priority for agent selection
+    
     def __init__(
         self,
         llm: BaseLanguageModel,
@@ -388,4 +393,4 @@ __all__ = [
     "ProjectGuideAgent",
     "ResearchAssistantAgent",
     "TroubleshooterAgent"
-] 
+]

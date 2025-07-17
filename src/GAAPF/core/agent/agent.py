@@ -23,6 +23,7 @@ from ..register.tool import ToolManager
 from ..memory.memory import Memory
 from ..mcp.client import DistributedMCPClient
 from ..graph.function_graph import FunctionStateGraph
+from ..utils.async_helpers import run_sync
 
 nest_asyncio.apply()
 
@@ -365,27 +366,14 @@ class Agent(AgentMeta):
             logger.info(f"🔄 Synchronous invoke called for user: {user_id}")
             
         try:
-            # Get the current running event loop
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            # If no event loop is running, create a new one
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            if self.is_logging:
-                logger.info("🔄 Created new event loop for synchronous call")
-
-        try:
-            # Schedule the async method and wait for its result
-            task = loop.create_task(self.ainvoke(query, is_save_memory, user_id, learning_context, **kwargs))
-            result = loop.run_until_complete(task)
-            if self.is_logging:
-                logger.info("✅ Synchronous invoke completed successfully")
-            return result
+            # Use run_sync helper to handle event loop compatibility
+            return run_sync(self.ainvoke(query, is_save_memory, user_id, learning_context, **kwargs))
         except Exception as e:
             logger.error(f"❌ Synchronous invoke failed: {e}")
             if self.is_logging:
                 logger.error(f"Sync invoke error: {traceback.format_exc()}")
             # Return safe fallback response
+            from langchain_core.messages import AIMessage
             return AIMessage(content="I apologize, but I encountered an error processing your request. Please try again.")
 
     async def stream(self, query: str, is_save_memory: bool = False, user_id: str = "unknown_user", learning_context: Dict = None, **kwargs) -> AsyncGenerator[Any, None]:

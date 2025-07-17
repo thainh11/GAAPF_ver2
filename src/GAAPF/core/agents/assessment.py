@@ -5,7 +5,7 @@ from pathlib import Path
 from . import SpecializedAgent
 from langchain_core.language_models.base import BaseLanguageModel
 from langchain_core.tools import BaseTool
-from src.GAAPF.prompts.assessment import generate_system_prompt
+from GAAPF.prompts.assessment import generate_system_prompt
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -21,6 +21,17 @@ class AssessmentAgent(SpecializedAgent):
     3. Identifying knowledge gaps and areas for improvement
     4. Tracking learning progress over time
     """
+    
+    # Class attributes for agent registry support
+    DESCRIPTION = "Expert in evaluating user knowledge and progress through assessments"
+    CAPABILITIES = [
+        "knowledge_assessment",
+        "quiz_creation",
+        "progress_evaluation",
+        "feedback_provision",
+        "gap_analysis"
+    ]
+    PRIORITY = 8  # High priority for assessment tasks
     
     def __init__(
         self,
@@ -246,4 +257,4 @@ As an assessment agent, evaluate knowledge or create appropriate assessment ques
                 "choices": choices if is_multiple_choice else []
             })
         
-        return questions 
+        return questions

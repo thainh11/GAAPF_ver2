@@ -262,25 +262,35 @@ Module:
         """
         Parse the AST of a module to extract tool functions.
         """
-        tools = {}
+        tools: Dict[str, Any] = {}
         for node in ast.walk(tree):
             if isinstance(node, ast.FunctionDef):
-                tool_name = node.name
-                tool_data = {
-                    "tool_name": tool_name,
-                    "arguments": {
-                        arg.arg: arg.annotation
-                        for arg in node.args.args
-                        if arg.annotation is not None
-                    },
-                    "return": node.returns.annotation,
-                    "docstring": ast.get_docstring(node),
-                    "module_path": "__runtime__",
+                # argument types
+                arguments: Dict[str, str] = {}
+                for arg in node.args.args:
+                    if arg.arg == "self":
+                        continue
+                    if arg.annotation:
+                        arguments[arg.arg] = ast.unparse(arg.annotation)
+                    else:
+                        arguments[arg.arg] = "Any"
+
+                # return type
+                if node.returns:
+                    return_type = ast.unparse(node.returns)
+                else:
+                    return_type = "Any"
+
+                tools[node.name] = {
+                    "tool_name": node.name,
+                    "arguments": arguments,
+                    "return": return_type,
+                    "docstring": ast.get_docstring(node) or "",
+                    "module_path": "__runtime__",   # filled in later
                     "tool_type": "function",
-                    "tool_call_id": "tool_" + str(uuid.uuid4()),
+                    "tool_call_id": f"tool_{uuid.uuid4()}",
                     "is_runtime": True,
                 }
-                tools[tool_name] = tool_data
         return tools
 
     def extract_tool(self, text: str) -> Optional[str]:
@@ -312,6 +322,39 @@ Module:
                             tool_type: str = Literal['function', 'mcp', 'module']
                             ) -> Any:
         """Execute the specified tool with given arguments"""
+        # FIX: Separate dangerous tools from safe tools
+        dangerous_tools = {"run_command", "terminal_execute", "bash"}
+        safe_tools = {"write_file"}  # Auto-approve safe tools
+        
+        if tool_name in dangerous_tools:
+            # Truncate long content for display
+            display_args = {}
+            for key, value in arguments.items():
+                if key == "content" and isinstance(value, str) and len(value) > 100:
+                    display_args[key] = value[:100] + "... (truncated)"
+                else:
+                    display_args[key] = value
+        
+            # Only prompt for dangerous tools
+            import asyncio
+            answer = await asyncio.to_thread(
+                input,
+                f"\n[GAAPF] The agent wants to run '{tool_name}' "
+                f"with arguments {display_args}. Execute it? (y/N): "
+            )
+            answer = answer.strip().lower()
+            
+            if answer not in {"y", "yes"}:
+                logger.info(f"User declined execution of {tool_name}")
+                from langchain_core.messages.tool import ToolMessage
+                return ToolMessage(
+                    content=f"Skipped execution of '{tool_name}' on user request.",
+                    tool_call_id=f"tool_{uuid.uuid4()}"
+                )
+        elif tool_name in safe_tools:
+            # Auto-approve safe tools like write_file
+            logger.info(f"Auto-approving safe tool execution: {tool_name}")
+        
         if tool_type == 'function':
             message = await FunctionTool.execute(self, tool_name, arguments)
         elif tool_type == 'mcp':

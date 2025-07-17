@@ -5,7 +5,7 @@ from pathlib import Path
 from . import SpecializedAgent
 from langchain_core.language_models.base import BaseLanguageModel
 from langchain_core.tools import BaseTool
-from src.GAAPF.prompts.knowledge_synthesizer import generate_system_prompt
+from GAAPF.prompts.knowledge_synthesizer import generate_system_prompt
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -21,6 +21,17 @@ class KnowledgeSynthesizerAgent(SpecializedAgent):
     3. Summarizing complex information into digestible insights
     4. Identifying patterns and relationships between concepts
     """
+    
+    # Class attributes for agent registry support
+    DESCRIPTION = "Expert in concept integration and knowledge synthesis"
+    CAPABILITIES = [
+        "concept_integration",
+        "knowledge_synthesis",
+        "pattern_recognition",
+        "mental_model_building",
+        "cross_module_connections"
+    ]
+    PRIORITY = 7  # High priority for synthesis tasks
     
     def __init__(
         self,
@@ -228,4 +239,4 @@ class KnowledgeSynthesizerAgent(SpecializedAgent):
             "chart"
         ]
         
-        return any(indicator in response_content for indicator in visual_indicators) 
+        return any(indicator in response_content for indicator in visual_indicators)

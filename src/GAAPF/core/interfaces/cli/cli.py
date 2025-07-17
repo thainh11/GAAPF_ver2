@@ -51,7 +51,6 @@ from ...agents import (
 )
 from ...memory.long_term_memory import LongTermMemory
 
-from langchain_openai import ChatOpenAI
 from langchain_together import ChatTogether
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_google_vertexai.chat_models import ChatVertexAI
@@ -158,6 +157,11 @@ class CommandRegistry:
             ModernCommand("/deepsearch", "Perform deep research", self.perform_deepsearch, ["/deep"], "Tools"),
             ModernCommand("/collect", "Collect framework information", self.collect_framework_info, ["/framework"], "Tools"),
             ModernCommand("/code", "Request specific agent for code help", self.request_code_help, ["/coding"], "Tools"),
+            # Feedback and Analytics Commands
+            ModernCommand("/feedback", "Provide feedback on learning experience", self.provide_feedback, ["/fb"], "Learning"),
+            ModernCommand("/analytics", "View learning analytics and insights", self.show_analytics, ["/stats"], "Learning"),
+            ModernCommand("/visualize", "Visualize learning progress and patterns", self.visualize_progress, ["/viz"], "Learning"),
+            ModernCommand("/insights", "Get personalized learning insights", self.show_insights, ["/ai"], "Learning"),
         ]
         
         for cmd in commands:
@@ -248,6 +252,23 @@ class CommandRegistry:
     def request_code_help(self):
         """Request specific agent for code help"""
         self.cli.request_specific_agent("code_assistant")
+    
+    # Feedback and Analytics Commands
+    def provide_feedback(self):
+        """Provide feedback on learning experience"""
+        self.cli.collect_user_feedback()
+    
+    def show_analytics(self):
+        """View learning analytics and insights"""
+        self.cli.display_learning_analytics()
+    
+    def visualize_progress(self):
+        """Visualize learning progress and patterns"""
+        self.cli.visualize_learning_progress()
+    
+    def show_insights(self):
+        """Get personalized learning insights"""
+        self.cli.show_personalized_insights()
 
 class LearningSessionState:
     """Represents the current learning session state."""
@@ -370,7 +391,7 @@ class GAAPFCLI:
         """Handle Ctrl+C gracefully with session saving."""
         self.console.print("\n[warning]💾 Saving session progress...[/warning]")
         
-        # FIX: Set shutdown flag instead of calling sys.exit(0)
+        # Set shutdown flag to prevent further processing
         self.shutdown_requested = True
         
         if self.current_session and self.long_term_memory:
@@ -398,6 +419,8 @@ class GAAPFCLI:
                 self.console.print(f"[warning]⚠️ Error saving session: {e}[/warning]")
         
         self.console.print("[info]👋 Thanks for learning with GAAPF! See you next time![/info]")
+        # Exit immediately to prevent further processing
+        sys.exit(0)
     
     def _load_gaapf_config(self):
         """Load GAAPF.md configuration file for project-specific behavior"""
@@ -506,121 +529,66 @@ class GAAPFCLI:
         self.console.print()
     
     def _get_llm_provider_display(self) -> str:
-        """Get a nice display name for the LLM provider"""
-        if self.selected_provider:
-            return self.selected_provider
-        elif self.llm:
-            if hasattr(self.llm, 'model_name'):
-                if 'together' in str(type(self.llm)).lower():
-                    return "Together AI"
-                elif 'google' in str(type(self.llm)).lower():
-                    return "Google Gemini"
-                elif 'openai' in str(type(self.llm)).lower():
-                    return "OpenAI"
-                elif 'vertex' in str(type(self.llm)).lower():
-                    return "Vertex AI"
-            return "LLM Connected"
-        return "Not Selected"
-    
-    def select_model_provider(self) -> BaseLanguageModel:
-        """Interactive model provider selection with enhanced UI"""
+        """Get the display name for the current LLM provider."""
+        if not self.llm:
+            return "Not Initialized"
         
-        # Header panel
-        model_header = Panel(
-            "[bold bright_blue]🧠 AI Model Selection[/bold bright_blue]\n"
-            "[dim]Choose your preferred AI provider for the best learning experience[/dim]",
-            style="bright_blue"
-        )
-        self.console.print(model_header)
+        provider_type = str(type(self.llm)).lower()
+        if 'together' in provider_type:
+            return "Together AI"
+        elif 'googlegenerativeai' in provider_type:
+            return "Google Gemini"
+        elif 'vertexai' in provider_type:
+            return "Vertex AI"
+        else:
+            return "Unknown"
+
+    def select_model_provider(self) -> BaseLanguageModel:
+        """Allow user to select a model provider from a list."""
         
         # Load environment variables
         load_dotenv()
         
-        # Available providers with detailed information
         providers = [
             {
-                "name": "Together AI",
-                "id": "together",
-                "model": "meta-llama/Llama-3-70B-Instruct-Turbo",
-                "description": "Fast and cost-effective LLaMA 3.3 model",
-                "env_var": "TOGETHER_API_KEY",
-                "strengths": "Cost-effective, Fast responses",
-                "best_for": "General learning, Code assistance"
+                "name": "Google Vertex AI",
+                "id": "vertex-ai",
+                "description": "Google's powerful and scalable platform",
+                "env_var": "GOOGLE_APPLICATION_CREDENTIALS",
+                "model": "gemini-2.5-flash",
+                "best_for": "Scalable GCP projects",
             },
             {
                 "name": "Google Gemini",
                 "id": "google-genai",
-                "model": "gemini-2.5-flash",
-                "description": "Latest Google Gemini 2.0 Flash model",
+                "description": "Google's latest family of models",
                 "env_var": "GOOGLE_API_KEY",
-                "strengths": "Latest features, Multimodal",
-                "best_for": "Advanced reasoning, Complex queries"
-            },
-            {
-                "name": "Google Vertex AI",
-                "id": "vertex-ai",
                 "model": "gemini-2.5-flash",
-                "description": "Google Cloud hosted model for enterprise use",
-                "env_vars": ["GOOGLE_CLOUD_PROJECT", "GOOGLE_APPLICATION_CREDENTIALS"],
-                "strengths": "GCP integration, Security",
-                "best_for": "Enterprise apps, Scalability"
+                "best_for": "General use & free tier",
             },
             {
-                "name": "OpenAI GPT-4",
-                "id": "openai",
-                "model": "gpt-4o",
-                "description": "OpenAI's most capable model",
-                "env_var": "OPENAI_API_KEY",
-                "strengths": "Highest quality, Proven reliability",
-                "best_for": "Complex learning, Professional use"
+                "name": "Together AI",
+                "id": "together",
+                "description": "Access open-source models",
+                "env_var": "TOGETHER_API_KEY",
+                "model": "meta-llama/Llama-3-70B-Instruct-Turbo",
+                "best_for": "Cost-effective OSS models",
             }
         ]
         
-        # Check which providers are available
-        available_providers = []
+        # Check availability for each provider
         for provider in providers:
-            # --- DEBUGGING START ---
-            self.console.print(f"[bold yellow]🔍 Checking provider: {provider['name']}[/bold yellow]")
-            if "env_vars" in provider:
-                # Handle providers requiring multiple env vars (like Vertex AI)
-                is_available = all(os.environ.get(var) and os.environ.get(var).strip() for var in provider["env_vars"])
-                self.console.print(f"  - Env vars required: {provider['env_vars']}")
-                for var in provider['env_vars']:
-                    self.console.print(f"    - {var}: '{os.environ.get(var)}'")
-                self.console.print(f"  - Initial availability: {is_available}")
-
-                if is_available and provider['id'] == 'vertex-ai':
-                    creds_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
-                    self.console.print(f"  - Vertex AI creds path: {creds_path}")
-                    if creds_path and Path(creds_path).is_file():
-                        self.console.print("  - [green]Credentials file found.[/green]")
-                    else:
-                        self.console.print("  - [red]Credentials file NOT found or path is incorrect.[/red]")
-                        is_available = False
+            if provider["id"] == "vertex-ai":
+                provider["available"] = bool(os.environ.get("GOOGLE_CLOUD_PROJECT") and os.environ.get(provider["env_var"]))
             else:
-                # Handle providers with a single env var
-                env_var_value = os.environ.get(provider.get("env_var"))
-                is_available = env_var_value and env_var_value.strip()
-                self.console.print(f"  - Env var required: {provider.get('env_var')}")
-                self.console.print(f"    - {provider.get('env_var')}: '{env_var_value}'")
-                self.console.print(f"  - Initial availability: {is_available}")
-
-            if is_available:
-                self.console.print(f"  -> [bold green]Provider is available.[/bold green]\n")
-                provider["available"] = True
-                available_providers.append(provider)
-            else:
-                self.console.print(f"  -> [bold red]Provider is NOT available.[/bold red]\n")
-                provider["available"] = False
-            # --- DEBUGGING END ---
+                provider["available"] = bool(os.environ.get(provider["env_var"]))
         
-        if not available_providers:
-            # Show setup instructions if no providers are configured
-            self._show_llm_setup_instructions()
-            sys.exit(1)
-        
-        # Create provider selection table
-        provider_table = Table(title="🚀 Available AI Providers", style="bright_cyan", show_header=True, header_style="bold bright_blue")
+        provider_table = Table(
+            title="🚀 Available AI Providers",
+            style="bright_cyan",
+            show_header=True,
+            header_style="bold bright_blue"
+        )
         provider_table.add_column("ID", style="dim", width=3, no_wrap=True)
         provider_table.add_column("Provider", style="bold bright_green", width=15)
         provider_table.add_column("Model", style="cyan", width=25)
@@ -628,7 +596,7 @@ class GAAPFCLI:
         provider_table.add_column("Status", style="success", width=10, justify="center")
         
         choice_options = []
-        for i, provider in enumerate(available_providers, 1):
+        for i, provider in enumerate(providers, 1):
             status = "🟢 Ready" if provider["available"] else "🔴 Setup Required"
             provider_table.add_row(
                 f"{i}.",
@@ -641,8 +609,6 @@ class GAAPFCLI:
         
         self.console.print(provider_table)
         
-
-        
         # Get user choice
         choice = Prompt.ask(
             "\n[bold cyan]Select your AI provider[/bold cyan]",
@@ -650,42 +616,37 @@ class GAAPFCLI:
             default="1"
         )
         
-        selected_provider = available_providers[int(choice) - 1]
+        selected_provider = providers[int(choice) - 1]
         
         # Initialize the selected provider with progress indicator
         with self.console.status(f"[bold green]🚀 Connecting to {selected_provider['name']}...", spinner="dots"):
             try:
                 time.sleep(1)  # Brief pause for visual effect
                 
-                if selected_provider["id"] == "together":
+                if selected_provider["id"] == "vertex-ai":
                     api_key = os.environ.get(selected_provider["env_var"])
-                    llm = ChatTogether(
-                        model=selected_provider["model"],
+                    llm = ChatVertexAI(
+                        model_name="gemini-2.5-flash", 
+                        project=os.environ.get("GOOGLE_CLOUD_PROJECT"),
                         temperature=0.7,
-                        api_key=api_key
                     )
                 elif selected_provider["id"] == "google-genai":
                     api_key = os.environ.get(selected_provider["env_var"])
                     llm = ChatGoogleGenerativeAI(
-                        model=selected_provider["model"],
+                        model="gemini-2.5-flash",
                         temperature=0.7,
-                        google_api_key=api_key
+                        google_api_key=api_key,
                     )
-                elif selected_provider["id"] == "vertex-ai":
-                    llm = ChatVertexAI(
-                        model_name=selected_provider["model"],
-                        temperature=0.7,
-                        project=os.environ.get("GOOGLE_CLOUD_PROJECT")
-                    )
-                elif selected_provider["id"] == "openai":
+                elif selected_provider["id"] == "together":
                     api_key = os.environ.get(selected_provider["env_var"])
-                    llm = ChatOpenAI(
-                        model=selected_provider["model"],
+                    llm = ChatTogether(
+                        model="meta-llama/Llama-3-70B-Instruct-Turbo",
                         temperature=0.7,
                         api_key=api_key
                     )
                 else:
-                    raise ValueError(f"Unknown provider: {selected_provider['id']}")
+                    self.console.print("[error]Invalid provider selected.[/error]")
+                    sys.exit(1)
                 
                 # Store the selected provider info
                 self.selected_provider = selected_provider["name"]
@@ -721,36 +682,14 @@ class GAAPFCLI:
         load_dotenv()
         
         # Get provider priority from environment or use default
-        provider_priority = os.environ.get("LLM_PROVIDER_PRIORITY", "together,google-genai,vertex-ai,openai").split(",")
+        provider_priority = os.environ.get("LLM_PROVIDER_PRIORITY", "vertex-ai,google-genai,together").split(",")
         
         # Try each provider in order of priority
         for provider in provider_priority:
             provider = provider.strip()
             
             try:
-                if provider == "together":
-                    api_key = os.environ.get("TOGETHER_API_KEY")
-                    if api_key and api_key.strip():
-                        if self.is_logging:
-                            self.console.print("[success]✓ Using Together AI[/success]")
-                        return ChatTogether(
-                            model="meta-llama/Llama-3-70B-Instruct-Turbo",
-                            temperature=0.7,
-                            api_key=api_key
-                        )
-                
-                elif provider == "google-genai":
-                    api_key = os.environ.get("GOOGLE_API_KEY")
-                    if api_key and api_key.strip():
-                        if self.is_logging:
-                            self.console.print("[success]✓ Using Google Gemini[/success]")
-                        return ChatGoogleGenerativeAI(
-                            model="gemini-2.5-flash",
-                            temperature=0.7,
-                            google_api_key=api_key
-                        )
-                
-                elif provider == "vertex-ai":
+                if provider == "vertex-ai":
                     project = os.environ.get("GOOGLE_CLOUD_PROJECT")
                     credentials_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
                     
@@ -770,13 +709,24 @@ class GAAPFCLI:
                                 self.console.print(f"[error]Failed to initialize Vertex AI: {e}[/error]")
                                 self.console.print("[info]Ensure 'gcloud auth application-default login' is run or GOOGLE_APPLICATION_CREDENTIALS is set.[/info]")
 
-                elif provider == "openai":
-                    api_key = os.environ.get("OPENAI_API_KEY")
+                elif provider == "google-genai":
+                    api_key = os.environ.get("GOOGLE_API_KEY")
                     if api_key and api_key.strip():
                         if self.is_logging:
-                            self.console.print("[success]✓ Using OpenAI[/success]")
-                        return ChatOpenAI(
-                            model="gpt-4o",
+                            self.console.print("[success]✓ Using Google Gemini[/success]")
+                        return ChatGoogleGenerativeAI(
+                            model="gemini-2.5-flash",
+                            temperature=0.7,
+                            google_api_key=api_key
+                        )
+                
+                elif provider == "together":
+                    api_key = os.environ.get("TOGETHER_API_KEY")
+                    if api_key and api_key.strip():
+                        if self.is_logging:
+                            self.console.print("[success]✓ Using Together AI[/success]")
+                        return ChatTogether(
+                            model="meta-llama/Llama-3-70B-Instruct-Turbo",
                             temperature=0.7,
                             api_key=api_key
                         )
@@ -799,17 +749,17 @@ To get started with GAAPF, you need to configure at least one AI provider:
 
 [bold bright_blue]🌟 Recommended Options:[/bold bright_blue]
 
-[bold]1. Together AI (Cost-effective)[/bold]
-   • Get API key: https://api.together.xyz/settings/api-keys
-   • Set: TOGETHER_API_KEY=your_key_here
+[bold]1. Google Vertex AI (Recommended)[/bold]
+   • Set up gcloud: `gcloud auth application-default login`
+   • Set: GOOGLE_CLOUD_PROJECT=your-gcp-project-id
 
 [bold]2. Google Gemini (Free tier)[/bold]
    • Get API key: https://aistudio.google.com/app/apikey
    • Set: GOOGLE_API_KEY=your_key_here
 
-[bold]3. OpenAI (Premium)[/bold]
-   • Get API key: https://platform.openai.com/api-keys
-   • Set: OPENAI_API_KEY=your_key_here
+[bold]3. Together AI (Cost-effective)[/bold]
+   • Get API key: https://api.together.xyz/settings/api-keys
+   • Set: TOGETHER_API_KEY=your_key_here
 
 [bold cyan]⚡ Quick Setup:[/bold cyan]
 1. Create a .env file in this directory
@@ -967,8 +917,19 @@ To get started with GAAPF, you need to configure at least one AI provider:
                 profile = self.user_profile_manager.get_profile(user_id)
                 name = profile.get("name", "Unknown")
                 experience = profile.get("experience_level", "beginner").title()
-                last_session = profile.get("last_session", "Never")
-                user_table.add_row(f"{i}.", name, experience, last_session)
+                
+                # Get last session info
+                last_session = profile.get("last_session")
+                last_session_time = profile.get("last_session_time")
+                
+                if last_session and last_session_time:
+                    # Convert timestamp to readable format
+                    last_session_date = datetime.fromtimestamp(last_session_time).strftime("%Y-%m-%d %H:%M")
+                    last_session_display = last_session_date
+                else:
+                    last_session_display = "Never"
+                
+                user_table.add_row(f"{i}.", name, experience, last_session_display)
             
             self.console.print()
             self.console.print(user_table)
@@ -1484,8 +1445,7 @@ To get started with GAAPF, you need to configure at least one AI provider:
                 }
                 
                 # Process through Learning Hub with full constellation context
-                processed_response = await asyncio.to_thread(
-                    self.learning_hub.process_interaction,
+                processed_response = self.learning_hub.process_interaction(
                     session_id=self.current_session.session_id,
                     interaction_data=interaction_data
                 )
@@ -1573,6 +1533,10 @@ How can I assist you today?"""
     @async_debug_step
     async def process_user_message(self, message: str) -> None:
         """Process user message using the LearningHub with enhanced integration."""
+        # Check for shutdown before processing
+        if self.shutdown_requested:
+            return
+        
         # Start end-to-end timer *as soon as we receive the user message*
         import time
         overall_start = time.perf_counter()
@@ -1622,8 +1586,7 @@ How can I assist you today?"""
                 }
                 
                 # Process through Learning Hub with enhanced context
-                processed_response = await asyncio.to_thread(
-                    self.learning_hub.process_interaction,
+                processed_response = self.learning_hub.process_interaction(
                     session_id=self.current_session.session_id,
                     interaction_data=interaction_data
                 )
@@ -1744,8 +1707,7 @@ How can I assist you today?"""
                             "learning_successful": "true"
                         }
                         
-                        await asyncio.to_thread(
-                            self.long_term_memory.add_external_knowledge,
+                        self.long_term_memory.add_external_knowledge(
                             text=f"Learning interaction: {message}",
                             user_id=self.current_session.user_id,
                             source="learning_session",
@@ -1765,6 +1727,10 @@ How can I assist you today?"""
                 if DEBUG_MODE:
                     logging.error(f"Message processing error: {e}", exc_info=True)
 
+        # Check for shutdown after processing
+        if self.shutdown_requested:
+            return
+    
     def _extract_agent_response(self, processed_response: Any) -> Tuple[str, str, Dict]:
         """
         Safely extract agent response content, type, and metadata from Learning Hub response.
@@ -2650,6 +2616,343 @@ Just ask your question naturally - GAAPF will route it to the right specialist!
         if hasattr(self.current_session, 'learning_context'):
             self.current_session.learning_context["requested_agent"] = agent_type
     
+    def provide_feedback(self):
+        """Collect and store user feedback about the learning experience."""
+        if not self.current_session:
+            self.console.print("[warning]No active learning session[/warning]")
+            return
+        
+        self.console.print("\n[bold bright_blue]📝 Learning Experience Feedback[/bold bright_blue]\n")
+        
+        # Collect feedback components
+        rating = Prompt.ask(
+            "[cyan]Rate your overall learning experience (1-5)[/cyan]",
+            choices=["1", "2", "3", "4", "5"],
+            default="3"
+        )
+        
+        difficulty = Prompt.ask(
+            "[cyan]How was the difficulty level?[/cyan]",
+            choices=["too_easy", "just_right", "too_hard"],
+            default="just_right"
+        )
+        
+        pace = Prompt.ask(
+            "[cyan]How was the learning pace?[/cyan]",
+            choices=["too_slow", "just_right", "too_fast"],
+            default="just_right"
+        )
+        
+        clarity = Prompt.ask(
+            "[cyan]How clear were the explanations? (1-5)[/cyan]",
+            choices=["1", "2", "3", "4", "5"],
+            default="3"
+        )
+        
+        engagement = Prompt.ask(
+            "[cyan]How engaging was the content? (1-5)[/cyan]",
+            choices=["1", "2", "3", "4", "5"],
+            default="3"
+        )
+        
+        suggestions = Prompt.ask(
+            "[cyan]Any suggestions for improvement? (optional)[/cyan]",
+            default=""
+        )
+        
+        comments = Prompt.ask(
+            "[cyan]Additional comments? (optional)[/cyan]",
+            default=""
+        )
+        
+        # Store feedback
+        try:
+            feedback_data = {
+                "rating": int(rating),
+                "difficulty": difficulty,
+                "pace": pace,
+                "clarity": int(clarity),
+                "engagement": int(engagement),
+                "suggestions": suggestions,
+                "comments": comments,
+                "framework_id": self.current_session.framework_id,
+                "module_id": getattr(self.current_session, 'current_module', 'unknown')
+            }
+            
+            self.user_profile_manager.store_feedback(
+                self.current_session.user_id,
+                feedback_data
+            )
+            
+            # Show confirmation
+            feedback_panel = Panel(
+                "[bold green]✅ Thank you for your feedback![/bold green]\n\n"
+                "Your input helps us improve the learning experience.\n"
+                "This feedback will be used to personalize your future sessions.",
+                title="📝 Feedback Recorded",
+                style="bright_green"
+            )
+            self.console.print(feedback_panel)
+            
+        except Exception as e:
+            self.console.print(f"[error]Failed to store feedback: {e}[/error]")
+    
+    def show_analytics(self):
+        """Display comprehensive learning analytics for the user."""
+        if not self.current_session:
+            self.console.print("[warning]No active learning session[/warning]")
+            return
+        
+        try:
+            user_profile = self.user_profile_manager.get_user_profile(self.current_session.user_id)
+            if not user_profile:
+                self.console.print("[warning]No user profile found[/warning]")
+                return
+            
+            analytics = user_profile.get('learning_analytics', {})
+            feedback_summary = self.user_profile_manager.get_feedback_summary(self.current_session.user_id)
+            
+            # Create analytics display
+            self.console.print("\n[bold bright_blue]📊 Learning Analytics Dashboard[/bold bright_blue]\n")
+            
+            # Session Statistics
+            stats_table = Table(title="📈 Session Statistics", style="bright_cyan")
+            stats_table.add_column("Metric", style="bold")
+            stats_table.add_column("Value", style="bright_white")
+            
+            stats_table.add_row("Total Sessions", str(analytics.get('total_sessions', 0)))
+            stats_table.add_row("Total Interactions", str(analytics.get('total_interactions', 0)))
+            stats_table.add_row("Average Session Length", f"{analytics.get('average_session_length', 0):.1f} minutes")
+            stats_table.add_row("Learning Velocity", f"{analytics.get('learning_velocity', 0):.2f} concepts/hour")
+            stats_table.add_row("Concept Mastery Rate", f"{analytics.get('concept_mastery_rate', 0):.1f}%")
+            
+            self.console.print(stats_table)
+            
+            # Engagement Patterns
+            if 'engagement_patterns' in analytics:
+                patterns = analytics['engagement_patterns']
+                engagement_table = Table(title="🎯 Engagement Patterns", style="bright_yellow")
+                engagement_table.add_column("Pattern", style="bold")
+                engagement_table.add_column("Value", style="bright_white")
+                
+                engagement_table.add_row("Peak Learning Hours", ", ".join(patterns.get('peak_hours', [])))
+                engagement_table.add_row("Preferred Session Length", f"{patterns.get('preferred_duration', 0)} minutes")
+                engagement_table.add_row("Question Frequency", f"{patterns.get('questions_per_session', 0):.1f}/session")
+                
+                self.console.print(engagement_table)
+            
+            # Feedback Summary
+            if feedback_summary:
+                feedback_table = Table(title="💬 Feedback Summary", style="bright_green")
+                feedback_table.add_column("Aspect", style="bold")
+                feedback_table.add_column("Average Rating", style="bright_white")
+                feedback_table.add_column("Trend", style="cyan")
+                
+                for aspect, data in feedback_summary.items():
+                    if isinstance(data, dict) and 'average' in data:
+                        trend = "📈" if data.get('trend', 0) > 0 else "📉" if data.get('trend', 0) < 0 else "➡️"
+                        feedback_table.add_row(aspect.title(), f"{data['average']:.1f}/5", trend)
+                
+                self.console.print(feedback_table)
+            
+        except Exception as e:
+            self.console.print(f"[error]Failed to display analytics: {e}[/error]")
+    
+    def visualize_progress(self):
+        """Create visual representations of learning progress."""
+        if not self.current_session:
+            self.console.print("[warning]No active learning session[/warning]")
+            return
+        
+        try:
+            user_profile = self.user_profile_manager.get_user_profile(self.current_session.user_id)
+            if not user_profile:
+                self.console.print("[warning]No user profile found[/warning]")
+                return
+            
+            progress_data = user_profile.get('progress', {})
+            framework_id = self.current_session.framework_id
+            
+            self.console.print("\n[bold bright_blue]📊 Learning Progress Visualization[/bold bright_blue]\n")
+            
+            # Framework Progress
+            if framework_id in progress_data:
+                framework_progress = progress_data[framework_id]
+                modules = framework_progress.get('modules', {})
+                
+                # Module Progress Chart
+                progress_table = Table(title=f"🎯 {framework_id} Module Progress", style="bright_purple")
+                progress_table.add_column("Module", style="bold")
+                progress_table.add_column("Progress", style="bright_white")
+                progress_table.add_column("Visual", style="cyan")
+                progress_table.add_column("Status", style="bright_green")
+                
+                for module_id, module_data in modules.items():
+                    completion = module_data.get('completion_percentage', 0)
+                    progress_bar = self._create_progress_bar(completion)
+                    
+                    if completion >= 100:
+                        status = "✅ Complete"
+                    elif completion >= 50:
+                        status = "🔄 In Progress"
+                    elif completion > 0:
+                        status = "🟡 Started"
+                    else:
+                        status = "⚪ Not Started"
+                    
+                    progress_table.add_row(
+                        module_id,
+                        f"{completion:.1f}%",
+                        progress_bar,
+                        status
+                    )
+                
+                self.console.print(progress_table)
+                
+                # Mastered Concepts
+                all_concepts = []
+                for module_data in modules.values():
+                    all_concepts.extend(module_data.get('mastered_concepts', []))
+                
+                if all_concepts:
+                    concepts_panel = Panel(
+                        "\n".join([f"• {concept}" for concept in all_concepts[:10]]) + 
+                        (f"\n... and {len(all_concepts) - 10} more" if len(all_concepts) > 10 else ""),
+                        title=f"🧠 Mastered Concepts ({len(all_concepts)} total)",
+                        style="bright_yellow"
+                    )
+                    self.console.print(concepts_panel)
+            
+            # Overall Progress Summary
+            total_frameworks = len(progress_data)
+            completed_frameworks = sum(1 for fw_data in progress_data.values() 
+                                     if fw_data.get('completion_percentage', 0) >= 100)
+            
+            summary_panel = Panel(
+                f"[bold]Learning Journey Summary[/bold]\n\n"
+                f"📚 Frameworks Explored: {total_frameworks}\n"
+                f"✅ Frameworks Completed: {completed_frameworks}\n"
+                f"🎯 Current Framework: {framework_id}\n"
+                f"📈 Overall Progress: {(completed_frameworks/max(total_frameworks, 1)*100):.1f}%",
+                title="🌟 Learning Journey",
+                style="bright_blue"
+            )
+            self.console.print(summary_panel)
+            
+        except Exception as e:
+            self.console.print(f"[error]Failed to visualize progress: {e}[/error]")
+    
+    def show_insights(self):
+        """Display personalized learning insights and recommendations."""
+        if not self.current_session:
+            self.console.print("[warning]No active learning session[/warning]")
+            return
+        
+        try:
+            user_profile = self.user_profile_manager.get_user_profile(self.current_session.user_id)
+            if not user_profile:
+                self.console.print("[warning]No user profile found[/warning]")
+                return
+            
+            analytics = user_profile.get('learning_analytics', {})
+            feedback_summary = self.user_profile_manager.get_feedback_summary(self.current_session.user_id)
+            progress_data = user_profile.get('progress', {})
+            
+            self.console.print("\n[bold bright_blue]💡 Personalized Learning Insights[/bold bright_blue]\n")
+            
+            # Learning Style Insights
+            learning_style = user_profile.get('learning_style', 'visual')
+            experience_level = user_profile.get('experience_level', 'beginner')
+            
+            style_insights = {
+                'visual': "You learn best with diagrams, charts, and visual examples",
+                'auditory': "You prefer explanations and verbal discussions",
+                'kinesthetic': "You learn through hands-on practice and experimentation",
+                'reading': "You prefer text-based learning and documentation"
+            }
+            
+            insights_content = Text()
+            insights_content.append("🎯 Learning Profile:\n", style="bold bright_cyan")
+            insights_content.append(f"• Style: {learning_style.title()} - {style_insights.get(learning_style, 'Mixed approach')}\n", style="white")
+            insights_content.append(f"• Experience: {experience_level.title()}\n\n", style="white")
+            
+            # Performance Insights
+            if analytics:
+                insights_content.append("📈 Performance Insights:\n", style="bold bright_green")
+                
+                mastery_rate = analytics.get('concept_mastery_rate', 0)
+                if mastery_rate >= 80:
+                    insights_content.append("• Excellent concept retention! You're mastering topics quickly.\n", style="bright_green")
+                elif mastery_rate >= 60:
+                    insights_content.append("• Good progress on concept mastery. Consider more practice exercises.\n", style="yellow")
+                else:
+                    insights_content.append("• Focus on reinforcing concepts through repetition and examples.\n", style="orange")
+                
+                velocity = analytics.get('learning_velocity', 0)
+                if velocity >= 2.0:
+                    insights_content.append("• Fast learner! You might benefit from advanced topics.\n", style="bright_green")
+                elif velocity >= 1.0:
+                    insights_content.append("• Steady learning pace. Maintain consistency for best results.\n", style="cyan")
+                else:
+                    insights_content.append("• Take your time to fully understand each concept before moving on.\n", style="yellow")
+            
+            # Recommendations
+            insights_content.append("\n🎯 Personalized Recommendations:\n", style="bold bright_yellow")
+            
+            # Based on learning style
+            if learning_style == 'visual':
+                insights_content.append("• Request more diagrams and visual examples\n", style="white")
+                insights_content.append("• Use the /visualize command to see progress charts\n", style="white")
+            elif learning_style == 'kinesthetic':
+                insights_content.append("• Focus on hands-on coding exercises\n", style="white")
+                insights_content.append("• Request practical projects and implementations\n", style="white")
+            
+            # Based on feedback
+            if feedback_summary:
+                avg_difficulty = feedback_summary.get('difficulty', {}).get('average', 3)
+                if avg_difficulty < 2.5:
+                    insights_content.append("• Consider advancing to more challenging topics\n", style="white")
+                elif avg_difficulty > 3.5:
+                    insights_content.append("• Spend more time on fundamentals before advancing\n", style="white")
+            
+            # Time-based insights
+            if 'engagement_patterns' in analytics:
+                peak_hours = analytics['engagement_patterns'].get('peak_hours', [])
+                if peak_hours:
+                    insights_content.append(f"• Your peak learning hours: {', '.join(peak_hours)}\n", style="white")
+            
+            insights_panel = Panel(insights_content, title="💡 Your Learning Insights", style="bright_blue")
+            self.console.print(insights_panel)
+            
+            # Next Steps
+            next_steps = Text()
+            next_steps.append("🚀 Suggested Next Steps:\n\n", style="bold bright_purple")
+            
+            # Current module progress
+            current_module = getattr(self.current_session, 'current_module', None)
+            if current_module and self.current_session.framework_id in progress_data:
+                module_progress = progress_data[self.current_session.framework_id].get('modules', {}).get(current_module, {})
+                completion = module_progress.get('completion_percentage', 0)
+                
+                if completion < 50:
+                    next_steps.append("1. Continue with current module fundamentals\n", style="white")
+                    next_steps.append("2. Ask for more examples and explanations\n", style="white")
+                elif completion < 100:
+                    next_steps.append("1. Practice exercises for current module\n", style="white")
+                    next_steps.append("2. Request assessment to test understanding\n", style="white")
+                else:
+                    next_steps.append("1. Move to the next module\n", style="white")
+                    next_steps.append("2. Try advanced topics or projects\n", style="white")
+            
+            next_steps.append("3. Provide feedback to improve your experience\n", style="white")
+            next_steps.append("4. Set specific learning goals for next session\n", style="white")
+            
+            next_steps_panel = Panel(next_steps, title="🎯 Action Plan", style="bright_purple")
+            self.console.print(next_steps_panel)
+            
+        except Exception as e:
+            self.console.print(f"[error]Failed to show insights: {e}[/error]")
+    
     # ============ HELPER METHODS ============
     
     def _create_progress_bar(self, percentage: float, width: int = 20) -> str:
@@ -2957,6 +3260,12 @@ Just ask your question naturally - GAAPF will route it to the right specialist!
         # Add appropriate formatting for better readability
         enhanced_response = self._improve_response_formatting(enhanced_response)
         
+        MAX_LEN = 1200
+        # custom limit – strip code & truncate
+        enhanced_response = re.sub(r"```.*?```", "[code omitted]", enhanced_response, flags=re.S)
+        if len(enhanced_response) > MAX_LEN:
+            enhanced_response = enhanced_response[:MAX_LEN] + "…"
+
         return enhanced_response
     
     def _generate_fallback_response(self, agent_type: str, learning_context: Dict) -> str:

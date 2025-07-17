@@ -449,16 +449,16 @@ class Constellation:
 
     def _create_agent(self, agent_type: str, memory_path: Optional[Path] = None) -> Optional[SpecializedAgent]:
         """
-        Create a specialized agent instance.
+        Create a specialized agent instance using the agent registry.
         """
         import time
+        from ..agents.registry import agent_registry
+        from ...utils.exceptions import AgentCreationError, AgentNotFoundError
+        
         start_time = time.time()
         try:
-            from importlib import import_module
-            import os
-            # Defensive: sanitize agent_type
+            # Sanitize agent_type
             sanitized_agent_type = agent_type.strip().lower().replace(" ", "_")
-            # Log agent_type and memory_path
             logger.info(f"Attempting to create agent: agent_type='{sanitized_agent_type}', memory_path='{memory_path}'")
             
             # Ensure memory path is properly configured
@@ -471,15 +471,13 @@ class Constellation:
             # Ensure memory directory exists
             memory_path.parent.mkdir(parents=True, exist_ok=True)
             
-            # Dynamically import the agent class
-            module = import_module(f"src.GAAPF.core.agents.{sanitized_agent_type}")
+            # Initialize registry if not already done
+            if not agent_registry._initialized:
+                agent_registry.initialize_default_agents()
             
-            # Get the agent class (assuming a convention like 'CodeAssistant' -> 'CodeAssistantAgent')
-            class_name = f"{''.join(word.capitalize() for word in sanitized_agent_type.split('_'))}Agent"
-            agent_class = getattr(module, class_name)
-            
-            # Create agent instance
-            agent_instance = agent_class(
+            # Create agent using registry
+            agent_instance = agent_registry.create_agent(
+                agent_type=sanitized_agent_type,
                 llm=self.llm,
                 memory_path=memory_path,
                 is_logging=self.is_logging
@@ -491,10 +489,10 @@ class Constellation:
             
             return agent_instance
 
-        except (ImportError, AttributeError, Exception) as e:
+        except (AgentNotFoundError, AgentCreationError) as e:
             # Log the error with elapsed time
             elapsed = time.time() - start_time
-            logger.error(f"Error creating {agent_type} agent: {e} (elapsed {elapsed:.3f} seconds)")
+            logger.error(f"Registry error creating {agent_type} agent: {e} (elapsed {elapsed:.3f} seconds)")
 
             # Fallback to MockAgent if specific agent fails
             logger.info(f"Creating mock agent for {agent_type} as fallback")
@@ -507,7 +505,8 @@ class Constellation:
             )
         
         except Exception as e:
-            logger.error(f"Critical error in _create_agent for {agent_type}: {e}")
+            elapsed = time.time() - start_time
+            logger.error(f"Critical error in _create_agent for {agent_type}: {e} (elapsed {elapsed:.3f} seconds)")
             return None
     
     def _get_agent_role(self, agent_type: str) -> str:

@@ -1,0 +1,25 @@
+# Requirements for GAAPF AgentBench Evaluation
+
+# FastAPI and server dependencies
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+pydantic>=2.0.0
+
+# HTTP client for testing
+requests>=2.31.0
+
+# CORS middleware
+python-multipart>=0.0.6
+
+# LangChain dependencies (if not already installed)
+langchain>=0.1.0
+langchain-core>=0.1.0
+
+# Google Vertex AI dependencies
+langchain-google-vertexai>=2.0.0
+google-cloud-aiplatform>=1.38.0
+google-auth>=2.23.0
+
+# Additional utilities
+python-dotenv>=1.0.0
+click>=8.0.0

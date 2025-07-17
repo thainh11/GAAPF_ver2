@@ -5,7 +5,7 @@ from pathlib import Path
 from . import SpecializedAgent
 from langchain_core.language_models.base import BaseLanguageModel
 from langchain_core.tools import BaseTool
-from src.GAAPF.prompts.code_assistant import generate_system_prompt
+from GAAPF.prompts.code_assistant import generate_system_prompt
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -19,8 +19,22 @@ class CodeAssistantAgent(SpecializedAgent):
     1. Creating code examples that demonstrate framework concepts
     2. Explaining code implementation details
     3. Helping users translate concepts into working code
-    4. Providing best practices for code implementation
+    4. Providing debugging assistance
+    5. Offering best practices for code organization
+    6. Adapting code complexity to user's skill level
     """
+    
+    # Class attributes for agent registry
+    DESCRIPTION = "Specialized in providing code examples and implementation guidance"
+    CAPABILITIES = [
+        "code_examples",
+        "implementation_guidance",
+        "debugging_assistance",
+        "best_practices",
+        "code_explanation",
+        "hands_on_coding"
+    ]
+    PRIORITY = 9  # High priority for coding tasks
     
     def __init__(
         self,
@@ -61,7 +75,7 @@ class CodeAssistantAgent(SpecializedAgent):
         if not tools:
             tools = [
                 "websearch_tools",
-                "computer_tools",
+                "computer_tools",  # Essential for file creation
                 "terminal_tools",
                 "framework_collector",
                 "deepsearch"
@@ -375,4 +389,4 @@ class CodeAssistantAgent(SpecializedAgent):
         
         # Fall back to framework language
         framework_config = learning_context.get("framework_config", {})
-        return framework_config.get("language", "unknown") 
+        return framework_config.get("language", "unknown")

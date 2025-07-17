@@ -5,7 +5,7 @@ from pathlib import Path
 from . import SpecializedAgent
 from langchain_core.language_models.base import BaseLanguageModel
 from langchain_core.tools import BaseTool
-from src.GAAPF.prompts.research_assistant import generate_system_prompt
+from GAAPF.prompts.research_assistant import generate_system_prompt
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -21,6 +21,17 @@ class ResearchAssistantAgent(SpecializedAgent):
     3. Identifying learning materials at appropriate skill levels
     4. Curating resources to supplement the learning experience
     """
+    
+    # Class attributes for agent registry support
+    DESCRIPTION = "Expert in finding additional learning resources"
+    CAPABILITIES = [
+        "resource_discovery",
+        "content_curation",
+        "community_research",
+        "material_evaluation",
+        "learning_supplements"
+    ]
+    PRIORITY = 5  # Medium priority for research tasks
     
     def __init__(
         self,
@@ -282,4 +293,4 @@ class ResearchAssistantAgent(SpecializedAgent):
             else:
                 categories["other"] += 1
         
-        return categories 
+        return categories
