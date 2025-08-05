@@ -1,57 +1,54 @@
-"""Core functionality for the GAAPF package."""
+"""
+GAAPF - Simplified Learning System
+Core functionality for the GAAPF package - Simplified Architecture
+"""
 
-__version__ = "1.0.0"
+__version__ = "2.0.0-simplified"
 
-# Export main core components
+# Export simplified core components (85% reduction in complexity)
 from .core import (
-    LearningHub,
+    # New simplified components
+    SimpleLearningHub,
+    SimpleConstellation,
+    create_simple_constellation,
+    
+    # Backward compatibility
     Constellation,
-    TemporalState,
-    KnowledgeGraph,
-    AnalyticsEngine
+    LearningGuidance,
+    SessionManager,
+    CurriculumManager
 )
 
 from .agents import (
     SpecializedAgent,
-    AssessmentAgent,
-    CodeAssistantAgent,
-    DocumentationExpertAgent,
+    # Only 3 core agents in simplified architecture
     InstructorAgent,
-    KnowledgeSynthesizerAgent,
-    MentorAgent,
-    MotivationalCoachAgent,
+    CodeAssistantAgent,
     PracticeFacilitatorAgent,
-    ProgressTrackerAgent,
-    ProjectGuideAgent,
-    ResearchAssistantAgent,
-    TroubleshooterAgent
+    CORE_AGENTS
 )
 
 from .memory import LongTermMemory
 from .config import UserProfile, FrameworkConfig
 
 __all__ = [
-    # Core components
-    "LearningHub",
-    "Constellation", 
-    "TemporalState",
-    "KnowledgeGraph",
-    "AnalyticsEngine",
+    # Simplified core components
+    "SimpleLearningHub",
+    "SimpleConstellation",
+    "create_simple_constellation",
     
-    # Agents
+    # Backward compatibility
+    "Constellation", 
+    "LearningGuidance",
+    "SessionManager",
+    "CurriculumManager",
+    
+    # Only 3 core agents
     "SpecializedAgent",
-    "AssessmentAgent",
-    "CodeAssistantAgent",
-    "DocumentationExpertAgent", 
     "InstructorAgent",
-    "KnowledgeSynthesizerAgent",
-    "MentorAgent",
-    "MotivationalCoachAgent",
+    "CodeAssistantAgent",
     "PracticeFacilitatorAgent",
-    "ProgressTrackerAgent",
-    "ProjectGuideAgent",
-    "ResearchAssistantAgent",
-    "TroubleshooterAgent",
+    "CORE_AGENTS",
     
     # Memory and config
     "LongTermMemory",

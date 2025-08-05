@@ -365,32 +365,24 @@ RESPONSE GUIDELINES:
         return structured_response
 
 
-# Import all the specialized agent classes
-from .assessment import AssessmentAgent
-from .code_assistant import CodeAssistantAgent
-from .documentation_expert import DocumentationExpertAgent
+# Import only the 3 core agents (simplified architecture)
 from .instructor import InstructorAgent
-from .knowledge_synthesizer import KnowledgeSynthesizerAgent
-from .mentor import MentorAgent
-from .motivational_coach import MotivationalCoachAgent
+from .code_assistant import CodeAssistantAgent
 from .practice_facilitator import PracticeFacilitatorAgent
-from .progress_tracker import ProgressTrackerAgent
-from .project_guide import ProjectGuideAgent
-from .research_assistant import ResearchAssistantAgent
-from .troubleshooter import TroubleshooterAgent
+
+# Agent registry for easy access
+CORE_AGENTS = {
+    "instructor": InstructorAgent,
+    "code_assistant": CodeAssistantAgent,
+    "practice": PracticeFacilitatorAgent
+}
 
 __all__ = [
     "SpecializedAgent",
-    "AssessmentAgent",
-    "CodeAssistantAgent", 
-    "DocumentationExpertAgent",
+    # Only 3 core agents in simplified architecture
     "InstructorAgent",
-    "KnowledgeSynthesizerAgent",
-    "MentorAgent",
-    "MotivationalCoachAgent",
+    "CodeAssistantAgent", 
     "PracticeFacilitatorAgent",
-    "ProgressTrackerAgent",
-    "ProjectGuideAgent",
-    "ResearchAssistantAgent",
-    "TroubleshooterAgent"
+    # Helper
+    "CORE_AGENTS"
 ]
