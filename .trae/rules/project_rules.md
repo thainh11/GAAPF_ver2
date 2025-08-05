@@ -1,0 +1,4 @@
+- You must using conda env name ver5 to run the project.
+- You can run the test file to test the implement, not run the CLI.
+- Usung vertex ai provider. Never using OpenAI provider.
+- Alway take advantage of existing code and module.

@@ -496,7 +496,6 @@ class Constellation:
 
             # Fallback to MockAgent if specific agent fails
             logger.info(f"Creating mock agent for {agent_type} as fallback")
-            from .constellation import MockAgent
             return MockAgent(
                 llm=self.llm,
                 agent_type=agent_type,

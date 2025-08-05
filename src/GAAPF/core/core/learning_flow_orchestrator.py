@@ -7,6 +7,7 @@ managing the complete learning experience from curriculum execution to user inte
 
 import asyncio
 import logging
+import time
 from typing import Dict, List, Optional, Any, TypedDict
 from pathlib import Path
 import json
@@ -14,6 +15,12 @@ from datetime import datetime
 
 from langgraph.graph import StateGraph, END, START
 from langgraph.graph.state import CompiledStateGraph
+
+from ...utils.exceptions import (
+    GaapfException, LearningException, SessionException,
+    ErrorSeverity, ErrorCategory, RecoveryStrategy,
+    global_error_handler
+)
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -238,6 +245,8 @@ class LearningFlowOrchestrator:
     # Node implementations for the learning flow graph
     async def _initialize_session_node(self, state: LearningFlowState) -> LearningFlowState:
         """Initialize the learning session with user and curriculum data."""
+        start_time = time.time()
+        
         try:
             # Initialize progress metrics
             state["progress_metrics"] = {
@@ -255,14 +264,37 @@ class LearningFlowOrchestrator:
                 "difficulty_level": "beginner"
             }
             
+            # Initialize error tracking
+            if "error_count" not in state:
+                state["error_count"] = 0
+            if "recovery_attempts" not in state:
+                state["recovery_attempts"] = 0
+            
             if self.is_logging:
                 logger.info(f"Session initialized: {state['session_id']}")
             
             return state
             
         except Exception as e:
-            state["errors"].append(f"Session initialization error: {str(e)}")
+            # Enhanced error handling with recovery
+            error = SessionException(
+                f"Session initialization failed: {str(e)}",
+                severity=ErrorSeverity.HIGH,
+                category=ErrorCategory.SYSTEM,
+                recovery_strategy=RecoveryStrategy.RETRY
+            )
+            
+            # Attempt recovery
+            recovery_result = await self._attempt_error_recovery(error, state)
+            if recovery_result:
+                return recovery_result
+            
+            # Log error and update state
+            global_error_handler.handle_error(error)
+            state["errors"].append(error.to_dict())
+            state["error_count"] += 1
             state["next_action"] = "error"
+            
             return state
     
     async def _load_current_module_node(self, state: LearningFlowState) -> LearningFlowState:
@@ -284,7 +316,22 @@ class LearningFlowOrchestrator:
             return state
             
         except Exception as e:
-            state["errors"].append(f"Module loading error: {str(e)}")
+            # Enhanced error handling
+            error = LearningException(
+                f"Module loading failed: {str(e)}",
+                severity=ErrorSeverity.MEDIUM,
+                category=ErrorCategory.DATA,
+                recovery_strategy=RecoveryStrategy.FALLBACK
+            )
+            
+            # Attempt recovery
+            recovery_result = await self._attempt_error_recovery(error, state)
+            if recovery_result:
+                return recovery_result
+            
+            global_error_handler.handle_error(error)
+            state["errors"].append(error.to_dict())
+            state["error_count"] += 1
             state["next_action"] = "error"
             return state
     
@@ -294,6 +341,17 @@ class LearningFlowOrchestrator:
             current_module = state["current_module"]
             framework_name = state["framework_name"]
             user_id = state["user_id"]
+            
+            # Check for fallback data if in degraded mode
+            if state.get("use_fallback_data"):
+                theory_content = self._get_fallback_theory_content(current_module)
+                state["theory_content"] = theory_content
+                state["use_fallback_data"] = False  # Reset flag
+                
+                if self.is_logging:
+                    logger.info(f"Using fallback theory content for module: {current_module.get('title', 'Unknown')}")
+                
+                return state
             
             # Generate theory content based on module and user progress
             theory_content = await self._generate_theory_content(
@@ -311,7 +369,22 @@ class LearningFlowOrchestrator:
             return state
             
         except Exception as e:
-            state["errors"].append(f"Theory generation error: {str(e)}")
+            # Enhanced error handling for content generation
+            error = LearningException(
+                f"Theory content generation failed: {str(e)}",
+                severity=ErrorSeverity.MEDIUM,
+                category=ErrorCategory.EXTERNAL_SERVICE,
+                recovery_strategy=RecoveryStrategy.FALLBACK
+            )
+            
+            # Attempt recovery
+            recovery_result = await self._attempt_error_recovery(error, state)
+            if recovery_result:
+                return recovery_result
+            
+            global_error_handler.handle_error(error)
+            state["errors"].append(error.to_dict())
+            state["error_count"] += 1
             state["next_action"] = "error"
             return state
     
@@ -559,17 +632,65 @@ class LearningFlowOrchestrator:
             return state
     
     async def _handle_error_node(self, state: LearningFlowState) -> LearningFlowState:
-        """Handle errors in the learning flow."""
+        """Handle errors in the learning flow with intelligent recovery."""
         try:
+            error_count = state.get("error_count", 0)
+            recovery_attempts = state.get("recovery_attempts", 0)
+            
+            # Analyze error patterns and attempt recovery
+            if error_count < 3 and recovery_attempts < 2:
+                # Try to recover based on error type
+                last_error = state["errors"][-1] if state["errors"] else None
+                
+                if last_error and isinstance(last_error, dict):
+                    error_category = last_error.get("category")
+                    recovery_strategy = last_error.get("recovery_strategy")
+                    
+                    if recovery_strategy == "RETRY":
+                        # Reset to previous stable state
+                        state["recovery_attempts"] += 1
+                        state["next_action"] = "retry_last_operation"
+                        
+                        if self.is_logging:
+                            logger.info(f"Attempting recovery via retry (attempt {recovery_attempts + 1})")
+                        
+                        return state
+                    
+                    elif recovery_strategy == "FALLBACK":
+                        # Use fallback mechanisms
+                        state["recovery_attempts"] += 1
+                        state["next_action"] = "use_fallback"
+                        
+                        if self.is_logging:
+                            logger.info(f"Attempting recovery via fallback (attempt {recovery_attempts + 1})")
+                        
+                        return state
+            
+            # If recovery attempts exhausted, mark as error
             state["completion_status"] = "error"
             
+            # Generate error summary for user
+            error_summary = self._generate_error_summary(state["errors"])
+            state["error_summary"] = error_summary
+            
             if self.is_logging:
-                logger.error(f"Learning flow error: {state['errors']}")
+                logger.error(f"Learning flow error (recovery exhausted): {error_summary}")
             
             return state
             
         except Exception as e:
-            state["errors"].append(f"Error handling error: {str(e)}")
+            # Critical error in error handler
+            critical_error = LearningException(
+                f"Critical error in error handler: {str(e)}",
+                severity=ErrorSeverity.CRITICAL,
+                category=ErrorCategory.SYSTEM,
+                recovery_strategy=RecoveryStrategy.ESCALATE
+            )
+            
+            global_error_handler.handle_error(critical_error)
+            state["errors"].append(critical_error.to_dict())
+            state["completion_status"] = "critical_error"
+            
             return state
     
     # Helper methods for content generation and evaluation
@@ -649,4 +770,184 @@ class LearningFlowOrchestrator:
     async def _save_session_state(self, session_id: str, state: LearningFlowState) -> None:
         """Save session state to storage."""
         # This would integrate with your session storage system
-        pass 
+        pass
+    
+    async def _attempt_error_recovery(self, error: GaapfException, state: LearningFlowState) -> Optional[LearningFlowState]:
+        """Attempt to recover from an error based on its type and recovery strategy."""
+        try:
+            recovery_strategy = error.recovery_strategy
+            
+            if recovery_strategy == RecoveryStrategy.RETRY and error.can_retry():
+                # Implement retry logic
+                state["recovery_attempts"] += 1
+                
+                if error.category == ErrorCategory.NETWORK:
+                    # Wait before retry for network issues
+                    await asyncio.sleep(1.0)
+                
+                # Reset error state for retry
+                if "errors" in state and state["errors"]:
+                    state["errors"] = state["errors"][:-1]  # Remove last error
+                
+                return state
+            
+            elif recovery_strategy == RecoveryStrategy.FALLBACK:
+                # Implement fallback mechanisms
+                if error.category == ErrorCategory.DATA:
+                    # Use default/cached data
+                    state["use_fallback_data"] = True
+                    return state
+                
+                elif error.category == ErrorCategory.EXTERNAL_SERVICE:
+                    # Use alternative service or cached results
+                    state["use_alternative_service"] = True
+                    return state
+            
+            elif recovery_strategy == RecoveryStrategy.DEGRADE:
+                # Graceful degradation
+                state["degraded_mode"] = True
+                state["performance_data"]["difficulty_level"] = "beginner"  # Reduce complexity
+                return state
+            
+            return None
+            
+        except Exception as recovery_error:
+            logger.error(f"Error during recovery attempt: {str(recovery_error)}")
+            return None
+    
+    def _generate_error_summary(self, errors: List[Any]) -> str:
+        """Generate a user-friendly error summary."""
+        if not errors:
+            return "No errors recorded"
+        
+        error_counts = {}
+        critical_errors = []
+        
+        for error in errors:
+            if isinstance(error, dict):
+                category = error.get("category", "unknown")
+                severity = error.get("severity", "unknown")
+                
+                error_counts[category] = error_counts.get(category, 0) + 1
+                
+                if severity == "CRITICAL":
+                    critical_errors.append(error.get("message", "Unknown critical error"))
+            else:
+                error_counts["general"] = error_counts.get("general", 0) + 1
+        
+        summary_parts = []
+        
+        if critical_errors:
+            summary_parts.append(f"Critical issues: {'; '.join(critical_errors[:2])}")
+        
+        if error_counts:
+            count_summary = ", ".join([f"{count} {category}" for category, count in error_counts.items()])
+            summary_parts.append(f"Error breakdown: {count_summary}")
+        
+        return "; ".join(summary_parts) if summary_parts else "Multiple errors occurred"
+    
+    def _analyze_error_patterns(self, state: LearningFlowState) -> Dict[str, Any]:
+        """Analyze error patterns to suggest recovery strategies."""
+        errors = state.get("errors", [])
+        
+        if not errors:
+            return {"pattern": "no_errors", "suggestion": "continue_normal"}
+        
+        # Count error types
+        error_categories = {}
+        recent_errors = errors[-5:]  # Last 5 errors
+        
+        for error in recent_errors:
+            if isinstance(error, dict):
+                category = error.get("category", "unknown")
+                error_categories[category] = error_categories.get(category, 0) + 1
+        
+        # Determine dominant pattern
+        if error_categories.get("NETWORK", 0) >= 2:
+            return {
+                "pattern": "network_issues",
+                "suggestion": "retry_with_backoff",
+                "recommended_delay": 2.0
+            }
+        
+        elif error_categories.get("DATA", 0) >= 2:
+            return {
+                "pattern": "data_issues",
+                "suggestion": "use_fallback_data",
+                "recommended_action": "load_cached_content"
+            }
+        
+        elif len(errors) >= 3:
+            return {
+                "pattern": "repeated_failures",
+                "suggestion": "escalate_or_abort",
+                "recommended_action": "notify_admin"
+            }
+        
+        return {
+            "pattern": "sporadic_errors",
+            "suggestion": "continue_with_monitoring"
+        }
+    
+    def _get_fallback_theory_content(self, module: Dict[str, Any]) -> str:
+        """Get fallback theory content when primary generation fails."""
+        module_title = module.get('title', 'Unknown Module')
+        module_description = module.get('description', 'No description available')
+        
+        return f"""
+# {module_title}
+
+## Overview
+{module_description}
+
+## Key Concepts
+This module covers fundamental concepts that are essential for understanding the framework.
+
+## Learning Objectives
+- Understand the basic principles
+- Learn practical applications
+- Develop hands-on skills
+
+*Note: This is simplified content due to technical limitations. Full content will be available once connectivity is restored.*
+        """.strip()
+    
+    def _get_fallback_code_examples(self, module: Dict[str, Any]) -> List[Dict[str, str]]:
+        """Get fallback code examples when primary generation fails."""
+        module_title = module.get('title', 'Unknown Module')
+        
+        return [
+            {
+                "title": f"Basic {module_title} Example",
+                "code": f"# Basic example for {module_title}\n# This is a simplified example\nprint('Hello, {module_title}!')",
+                "explanation": "This is a basic example to demonstrate core concepts."
+            },
+            {
+                "title": "Getting Started",
+                "code": "# Step-by-step implementation\n# 1. Import required modules\n# 2. Initialize components\n# 3. Execute main logic",
+                "explanation": "Follow these steps to get started with the implementation."
+            }
+        ]
+    
+    async def _monitor_performance_metrics(self, state: LearningFlowState) -> None:
+        """Monitor and log performance metrics for the learning session."""
+        try:
+            metrics = {
+                "session_id": state["session_id"],
+                "user_id": state["user_id"],
+                "framework_name": state["framework_name"],
+                "module_index": state["module_index"],
+                "error_count": state.get("error_count", 0),
+                "recovery_attempts": state.get("recovery_attempts", 0),
+                "overall_progress": state["progress_metrics"].get("overall_progress", 0.0),
+                "quiz_accuracy": state["performance_data"].get("quiz_accuracy", 0.0),
+                "timestamp": datetime.now().isoformat()
+            }
+            
+            # Log metrics for monitoring
+            if self.is_logging:
+                logger.info(f"Performance metrics: {json.dumps(metrics, indent=2)}")
+            
+            # Could integrate with monitoring system here
+            
+        except Exception as e:
+            logger.error(f"Error monitoring performance metrics: {str(e)}")

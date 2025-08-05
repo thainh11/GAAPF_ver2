@@ -1,0 +1,56 @@
+{
+  "framework_name": "haystack",
+  "cached_at": 1752872717.8344562,
+  "data_version": "2025-07-19T04:05:14.084566",
+  "content_summary": {
+    "has_overview": false,
+    "concepts_count": 5,
+    "docs_count": 0,
+    "tutorials_count": 1,
+    "api_count": 0,
+    "examples_count": 0
+  },
+  "data": {
+    "framework_name": "haystack",
+    "collection_timestamp": "2025-07-19T04:05:14.084566",
+    "official_docs": {},
+    "github_info": {},
+    "tutorials": [
+      {
+        "title": "Stub search result",
+        "url": "https://example.com",
+        "snippet": "This is a stub search result. The actual search functionality is not implemented.",
+        "source": "tavily_search"
+      }
+    ],
+    "examples": [],
+    "api_reference": {},
+    "concepts": [
+      {
+        "name": "haystack",
+        "description": "The main haystack framework",
+        "source": "fallback"
+      },
+      {
+        "name": "Installation",
+        "description": "How to install haystack",
+        "source": "fallback"
+      },
+      {
+        "name": "Getting Started",
+        "description": "Basic haystack usage",
+        "source": "fallback"
+      },
+      {
+        "name": "API",
+        "description": "haystack API interface",
+        "source": "fallback"
+      },
+      {
+        "name": "Examples",
+        "description": "haystack usage examples",
+        "source": "fallback"
+      }
+    ]
+  }
+}

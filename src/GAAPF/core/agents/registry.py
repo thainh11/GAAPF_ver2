@@ -175,7 +175,7 @@ class AgentRegistry:
         
         return matching_agents
     
-    def auto_discover_agents(self, agents_package: str = "src.GAAPF.core.agents"):
+    def auto_discover_agents(self, agents_package: str = "GAAPF.core.agents"):
         """Automatically discover and register agents from a package.
         
         Args:

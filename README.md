@@ -175,9 +175,25 @@ cp env.example .env
 # Edit .env with your API keys
 ```
 
-4. **Run the CLI (Recommended)**
+### ⚠️ IMPORTANT: Framework Initialization (REQUIRED)
+
+**Before using GAAPF for learning, you MUST initialize the framework knowledge base:**
+
 ```bash
-python run_cli.py
+python setup_framework_knowledge.py
+```
+
+**What this does:**
+- Initializes ALL supported frameworks (LangChain, LangGraph, CrewAI, AutoGen, Haystack, LlamaIndex)
+- Stores framework information in vector database for semantic search
+- Sets up caching and monitoring systems
+- **Time required:** 10-30 minutes (one-time setup)
+
+**📖 For detailed setup instructions, see:** [`SETUP_INSTRUCTIONS.md`](SETUP_INSTRUCTIONS.md)
+
+### 4. **Run the CLI (Recommended)**
+```bash
+python run_optimized_cli.py
 ```
 
 **Alternative interfaces:**
@@ -846,4 +862,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 [⭐ Star us on GitHub](https://github.com/your-username/gaapf-guidance-ai-agent) | [🐛 Report Issues](https://github.com/your-username/gaapf-guidance-ai-agent/issues) | [💡 Request Features](https://github.com/your-username/gaapf-guidance-ai-agent/discussions)
 
-</div> 
+</div>

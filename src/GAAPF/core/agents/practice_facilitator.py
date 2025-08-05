@@ -1,11 +1,25 @@
 import logging
+import time
 from typing import Dict, List, Optional, Union, Any
 from pathlib import Path
 
 from . import SpecializedAgent
 from langchain_core.language_models.base import BaseLanguageModel
 from langchain_core.tools import BaseTool
-from GAAPF.prompts.practice_facilitator import generate_system_prompt
+from ...prompts.practice_facilitator import generate_system_prompt
+
+# Enhanced imports for adaptive learning
+try:
+    from ..learning.bayesian_kt import BayesianKnowledgeTracker
+    from ..gamification.achievement_system import AchievementSystem
+    from ..config.adaptive_config import AdaptiveConfigManager
+    ENHANCED_FEATURES_AVAILABLE = True
+except ImportError:
+    logging.warning("Enhanced features not available. Install required dependencies for full functionality.")
+    BayesianKnowledgeTracker = None
+    AchievementSystem = None
+    AdaptiveConfigManager = None
+    ENHANCED_FEATURES_AVAILABLE = False
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -88,6 +102,42 @@ class PracticeFacilitatorAgent(SpecializedAgent):
             *args, **kwargs
         )
         
+        # Initialize enhanced learning components
+        self.bkt_tracker = None
+        self.achievement_system = None
+        self.adaptive_config_manager = None
+        
+        if ENHANCED_FEATURES_AVAILABLE:
+            try:
+                # Initialize BKT tracker
+                if BayesianKnowledgeTracker:
+                    self.bkt_tracker = BayesianKnowledgeTracker(
+                        user_id="default",  # Will be updated per user
+                        storage_path=memory_path.parent / "bkt_data" if memory_path else None
+                    )
+                    if self.is_logging:
+                        logger.info("BKT tracker initialized for practice facilitator")
+                
+                # Initialize achievement system
+                if AchievementSystem:
+                    self.achievement_system = AchievementSystem(
+                        storage_path=memory_path.parent / "achievements" if memory_path else None
+                    )
+                    if self.is_logging:
+                        logger.info("Achievement system initialized for practice facilitator")
+                
+                # Initialize adaptive config manager
+                if AdaptiveConfigManager:
+                    self.adaptive_config_manager = AdaptiveConfigManager(
+                        storage_path=memory_path.parent / "adaptive_config" if memory_path else None
+                    )
+                    if self.is_logging:
+                        logger.info("Adaptive config manager initialized for practice facilitator")
+                        
+            except Exception as e:
+                if self.is_logging:
+                    logger.warning(f"Failed to initialize enhanced features: {e}")
+        
         if self.is_logging:
             logger.info(f"Initialized PracticeFacilitatorAgent with config: {self.config}")
     
@@ -139,14 +189,58 @@ class PracticeFacilitatorAgent(SpecializedAgent):
         exercise_types = module_info.get("exercise_types", [])
         exercises_str = ", ".join(exercise_types) if exercise_types else "None specified"
         
+        # Get adaptive learning context if available
+        user_id = learning_context.get("user_id", "unknown")
+        adaptive_context = ""
+        
+        if self.bkt_tracker:
+            try:
+                knowledge_state = self.bkt_tracker.get_knowledge_probabilities(user_id)
+                mastery_status = self.bkt_tracker.get_mastery_status(user_id)
+                recommended_skills = self.bkt_tracker.recommend_skills(user_id)
+                
+                # Format knowledge state info for practice
+                if knowledge_state:
+                    weak_skills = sorted([(skill, prob) for skill, prob in knowledge_state.items() if prob < 0.6], 
+                                        key=lambda x: x[1])
+                    if weak_skills:
+                        skill_info = ", ".join([f"{skill}: {prob:.2f}" for skill, prob in weak_skills[:3]])
+                        adaptive_context += f"\n- Skills needing practice: {skill_info}"
+                
+                if mastery_status:
+                    mastered_skills = [skill for skill, mastered in mastery_status.items() if mastered]
+                    adaptive_context += f"\n- Mastered skills: {', '.join(mastered_skills) if mastered_skills else 'None'}"
+                
+                if recommended_skills:
+                    adaptive_context += f"\n- Recommended practice areas: {', '.join(recommended_skills[:3])}"
+                    
+            except Exception as e:
+                if self.is_logging:
+                    logger.warning(f"Failed to get BKT context: {e}")
+        
+        if self.adaptive_config_manager:
+            try:
+                user_config = self.adaptive_config_manager.get_user_config(user_id)
+                difficulty_level = user_config.get('difficulty', {}).get('base_level', 0.5)
+                learning_style = user_config.get('personalization', {}).get('learning_style', 'balanced')
+                exercise_preference = user_config.get('content', {}).get('exercise_types', [])
+                adaptive_context += f"\n- Difficulty level: {difficulty_level:.2f}"
+                adaptive_context += f"\n- Learning style: {learning_style}"
+                if exercise_preference:
+                    adaptive_context += f"\n- Preferred exercise types: {', '.join(exercise_preference)}"
+            except Exception as e:
+                if self.is_logging:
+                    logger.warning(f"Failed to get adaptive config: {e}")
+        
         # Add practice facilitator-specific context
         practice_context = f"""
 Additional context for practice activities:
 - Module skill level: {skill_level}
 - Completed exercises: {len(completed_exercises)}
-- Recommended exercise types: {exercises_str}
+- Recommended exercise types: {exercises_str}{adaptive_context}
 
-As a practice facilitator, create appropriate exercises or provide guidance on practice activities.
+As a practice facilitator, create adaptive exercises based on the user's knowledge state and learning preferences.
+Focus on skills that need practice and adjust difficulty according to their current level.
 """
         
         # Combine contexts

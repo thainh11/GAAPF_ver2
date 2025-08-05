@@ -87,10 +87,14 @@ class CurriculumGenerator:
         """
         Initializes the generator with a ChromaDB client.
         """
+        # Set up credentials path for Vertex AI
+        credentials_path = "d:\\Work2\\Do_an\\vinagent-main\\google-credentials.json"
+        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = credentials_path
+        
         self.embedding_function = VertexAIEmbeddings(
             model_name="text-embedding-large-exp-03-07", # Use a stable, 768-dimension model
-            project=project,
-            location=location
+            project=project or "gen-lang-client-0305686287",
+            location=location or "us-central1"
         )
         self._client = db_client
         self._collection_name = collection_name
@@ -105,8 +109,8 @@ class CurriculumGenerator:
         self.llm = ChatVertexAI(
             model_name="gemini-2.5-flash", 
             temperature=0.3,
-            project=project,
-            location=location
+            project=project or "gen-lang-client-0305686287",
+            location=location or "us-central1"
         )
         self.prompt = ChatPromptTemplate.from_template(CURRICULUM_TEMPLATE)
 
@@ -255,4 +259,4 @@ if __name__ == '__main__':
     question = "What is the difference between retrievers and vector stores?"
     answer = generator.answer_question(question, framework_name="langchain")
     print(f"Question: {question}")
-    print(f"Answer: {answer}") 
+    print(f"Answer: {answer}")

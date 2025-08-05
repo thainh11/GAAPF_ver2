@@ -1,0 +1,38 @@
+{
+    "id": "autogen",
+    "name": "Microsoft AutoGen",
+    "description": "Multi-agent conversation framework for LLM-based applications",
+    "version": "0.2.x",
+    "modules": {
+        "introduction": {
+            "title": "Introduction",
+            "description": "Introduction to autogen",
+            "complexity": "basic",
+            "estimated_duration": 30,
+            "concepts": [
+                "overview",
+                "installation"
+            ],
+            "prerequisites": []
+        }
+    },
+    "learning_paths": {
+        "default": {
+            "name": "Default Path",
+            "description": "Standard learning path",
+            "modules": [
+                "introduction"
+            ],
+            "target_experience": "beginner"
+        }
+    },
+    "metadata": {
+        "tags": [],
+        "category": "general",
+        "official_website": "",
+        "repository": ""
+    },
+    "starting_module": "introduction",
+    "created_at": 1753758670,
+    "updated_at": 1753758670
+}

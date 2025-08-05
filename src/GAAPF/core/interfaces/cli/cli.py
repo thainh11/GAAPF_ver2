@@ -24,7 +24,7 @@ from rich.console import Console
 from rich.theme import Theme
 from rich.panel import Panel
 from rich.columns import Columns
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
+from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn, TimeElapsedColumn
 from rich.table import Table
 from rich.syntax import Syntax
 from rich.markdown import Markdown
@@ -43,6 +43,7 @@ from ...config.user_profiles import UserProfile
 from ...config.framework_configs import FrameworkConfig
 from ...core.learning_hub import LearningHub
 from ...core.constellation import Constellation, create_constellation_for_context
+from GAAPF.core.core.dynamic_integration import DynamicIntegrationManager, IntegrationMode, DynamicCapabilities
 from ...agents import (
     InstructorAgent, CodeAssistantAgent, DocumentationExpertAgent,
     PracticeFacilitatorAgent, AssessmentAgent, MentorAgent,
@@ -50,13 +51,34 @@ from ...agents import (
     MotivationalCoachAgent, KnowledgeSynthesizerAgent, ProgressTrackerAgent
 )
 from ...memory.long_term_memory import LongTermMemory
+from loguru import logger
+
+# Enhanced imports for refactoring
+try:
+    from ..tui.tui_dashboard import TUIManager
+    TUI_AVAILABLE = True
+except ImportError:
+    TUI_AVAILABLE = False
+    TUIManager = None
+    logger.warning("TUI Dashboard not available. Install textual: pip install textual")
+
+try:
+    from ...learning.bayesian_kt import BayesianKnowledgeTracker
+    from ...gamification.achievement_system import AchievementSystem
+    from ...config.adaptive_config import AdaptiveConfigManager
+    ENHANCED_FEATURES_AVAILABLE = True
+except ImportError:
+    ENHANCED_FEATURES_AVAILABLE = False
+    BayesianKnowledgeTracker = None
+    AchievementSystem = None
+    AdaptiveConfigManager = None
+    logger.warning("Enhanced features not available. Some functionality may be limited.")
 
 from langchain_together import ChatTogether
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_google_vertexai.chat_models import ChatVertexAI
 from langchain_core.language_models.base import BaseLanguageModel
 from langchain_core.messages import HumanMessage, AIMessage
-from loguru import logger
 from dotenv import load_dotenv
 
 # Setup debug logging
@@ -162,6 +184,22 @@ class CommandRegistry:
             ModernCommand("/analytics", "View learning analytics and insights", self.show_analytics, ["/stats"], "Learning"),
             ModernCommand("/visualize", "Visualize learning progress and patterns", self.visualize_progress, ["/viz"], "Learning"),
             ModernCommand("/insights", "Get personalized learning insights", self.show_insights, ["/ai"], "Learning"),
+            
+            # Enhanced TUI and Dashboard Commands
+            ModernCommand("/dashboard", "Launch TUI dashboard interface", self.launch_dashboard, ["/tui", "/ui"], "Dashboard"),
+            ModernCommand("/milestones", "View and manage learning milestones", self.show_milestones, ["/mile"], "Learning"),
+            ModernCommand("/achievements", "View achievements and badges", self.show_achievements, ["/badges"], "Gamification"),
+            ModernCommand("/knowledge", "View Bayesian knowledge tracking", self.show_knowledge_state, ["/bkt"], "Learning"),
+            ModernCommand("/adaptive", "Configure adaptive learning settings", self.configure_adaptive, ["/adapt"], "Configuration"),
+            ModernCommand("/gamify", "Toggle gamification features", self.toggle_gamification, ["/game"], "Gamification"),
+            
+            # Dynamic Capabilities Commands
+            ModernCommand("/dynamic", "Access dynamic constellation generation", self.show_dynamic_capabilities, ["/dyn"], "Dynamic"),
+            ModernCommand("/generate", "Generate dynamic constellation for context", self.generate_dynamic_constellation, ["/gen"], "Dynamic"),
+            ModernCommand("/calibrate", "Calibrate learning parameters dynamically", self.calibrate_parameters, ["/cal"], "Dynamic"),
+            ModernCommand("/recommend", "Get AI-powered recommendations", self.get_recommendations, ["/rec"], "Dynamic"),
+            ModernCommand("/mode", "Switch integration mode (hybrid/full/enhanced)", self.switch_integration_mode, ["/imode"], "Dynamic"),
+            ModernCommand("/performance", "View dynamic performance metrics", self.show_performance_metrics, ["/perf"], "Dynamic"),
         ]
         
         for cmd in commands:
@@ -269,6 +307,56 @@ class CommandRegistry:
     def show_insights(self):
         """Get personalized learning insights"""
         self.cli.show_personalized_insights()
+    
+    # Enhanced TUI and Dashboard Commands
+    def launch_dashboard(self):
+        """Launch TUI dashboard interface"""
+        self.cli.launch_tui_dashboard()
+    
+    def show_milestones(self):
+        """View and manage learning milestones"""
+        self.cli.display_milestones()
+    
+    def show_achievements(self):
+        """View achievements and badges"""
+        self.cli.display_achievements()
+    
+    def show_knowledge_state(self):
+        """View Bayesian knowledge tracking"""
+        self.cli.display_knowledge_state()
+    
+    def configure_adaptive(self):
+        """Configure adaptive learning settings"""
+        self.cli.configure_adaptive_settings()
+    
+    def toggle_gamification(self):
+        """Toggle gamification features"""
+        self.cli.toggle_gamification_features()
+    
+    # Dynamic Capabilities Commands
+    def show_dynamic_capabilities(self):
+        """Show dynamic capabilities overview"""
+        self.cli.show_dynamic_capabilities_overview()
+    
+    def generate_dynamic_constellation(self):
+        """Generate dynamic constellation for context"""
+        self.cli.generate_dynamic_constellation_interactive()
+    
+    def calibrate_parameters(self):
+        """Calibrate learning parameters dynamically"""
+        self.cli.calibrate_parameters_interactive()
+    
+    def get_recommendations(self):
+        """Get AI-powered recommendations"""
+        self.cli.get_ai_recommendations_interactive()
+    
+    def switch_integration_mode(self):
+        """Switch integration mode"""
+        self.cli.switch_integration_mode_interactive()
+    
+    def show_performance_metrics(self):
+        """View dynamic performance metrics"""
+        self.cli.show_dynamic_performance_metrics()
 
 class LearningSessionState:
     """Represents the current learning session state."""
@@ -378,6 +466,10 @@ class GAAPFCLI:
         # Initialize long-term memory later after LLM selection
         self.long_term_memory = None
         
+        # Initialize dynamic integration manager later after LLM selection
+        self.dynamic_manager = None
+        self.integration_mode = IntegrationMode.HYBRID  # Default to hybrid mode
+        
         # Setup signal handler for graceful shutdown
         signal.signal(signal.SIGINT, self._signal_handler)
         
@@ -451,6 +543,18 @@ class GAAPFCLI:
             TextColumn("[muted]({task.elapsed:.1f}s)[/muted]"),
             console=self.console,
             transient=True
+        )
+    
+    def _create_detailed_progress_indicator(self):
+        """Create a detailed progress indicator for agent processing."""
+        return Progress(
+            SpinnerColumn("dots12", style="cyan"),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TaskProgressColumn(),
+            TimeElapsedColumn(),
+            console=self.console,
+            transient=True  # Remove progress bars when complete
         )
     
     def get_agent_emoji(self, agent_type: str) -> str:
@@ -624,10 +728,14 @@ class GAAPFCLI:
                 time.sleep(1)  # Brief pause for visual effect
                 
                 if selected_provider["id"] == "vertex-ai":
-                    api_key = os.environ.get(selected_provider["env_var"])
+                    # Set up credentials path
+                    credentials_path = "d:\\Work2\\Do_an\\vinagent-main\\google-credentials.json"
+                    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = credentials_path
+                    
                     llm = ChatVertexAI(
                         model_name="gemini-2.5-flash", 
-                        project=os.environ.get("GOOGLE_CLOUD_PROJECT"),
+                        project=os.environ.get("GOOGLE_CLOUD_PROJECT", "gen-lang-client-0305686287"),
+                        location="us-central1",
                         temperature=0.7,
                     )
                 elif selected_provider["id"] == "google-genai":
@@ -690,24 +798,27 @@ class GAAPFCLI:
             
             try:
                 if provider == "vertex-ai":
-                    project = os.environ.get("GOOGLE_CLOUD_PROJECT")
-                    credentials_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+                    # Set up credentials path
+                    credentials_path = "d:\\Work2\\Do_an\\vinagent-main\\google-credentials.json"
+                    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = credentials_path
                     
-                    if project and credentials_path:
-                        try:
-                            log_message = f"[success]✓ Using Google Vertex AI (Project: {project})[/success]"
-                            if self.is_logging:
-                                self.console.print(log_message + " with application credentials.")
-                            
-                            return ChatVertexAI(
-                                model_name="gemini-2.5-flash",
-                                temperature=0.7,
-                                project=project
-                            )
-                        except Exception as e:
-                            if self.is_logging:
-                                self.console.print(f"[error]Failed to initialize Vertex AI: {e}[/error]")
-                                self.console.print("[info]Ensure 'gcloud auth application-default login' is run or GOOGLE_APPLICATION_CREDENTIALS is set.[/info]")
+                    project = os.environ.get("GOOGLE_CLOUD_PROJECT", "gen-lang-client-0305686287")
+                    
+                    try:
+                        log_message = f"[success]✓ Using Google Vertex AI (Project: {project})[/success]"
+                        if self.is_logging:
+                            self.console.print(log_message + " with application credentials.")
+                        
+                        return ChatVertexAI(
+                            model_name="gemini-2.5-flash",
+                            temperature=0.7,
+                            project=project,
+                            location="us-central1"
+                        )
+                    except Exception as e:
+                        if self.is_logging:
+                            self.console.print(f"[error]Failed to initialize Vertex AI: {e}[/error]")
+                            self.console.print("[info]Ensure 'gcloud auth application-default login' is run or GOOGLE_APPLICATION_CREDENTIALS is set.[/info]")
 
                 elif provider == "google-genai":
                     api_key = os.environ.get("GOOGLE_API_KEY")
@@ -802,6 +913,13 @@ To get started with GAAPF, you need to configure at least one AI provider:
             is_logging=self.is_logging,
             project=gcp_project,
             location=gcp_location
+        )
+        
+        # Initialize dynamic integration manager
+        self.dynamic_manager = DynamicIntegrationManager(
+            llm=self.llm,
+            integration_mode=self.integration_mode,
+            is_logging=self.is_logging
         )
     
     def _initialize_agents(self) -> Dict:
@@ -1570,9 +1688,13 @@ How can I assist you today?"""
         from langchain_core.messages import HumanMessage, AIMessage
         self.current_session.messages.append(HumanMessage(content=message))
 
-        # Show thinking indicator
-        with self.create_contextual_spinner("AI constellation is processing...", style="info") as status:
+        # Show detailed action indicators
+        with self._create_detailed_progress_indicator() as progress:
             try:
+                # Step 1: Preparing interaction data
+                task_prepare = progress.add_task("[cyan]📋 Preparing interaction data...", total=100)
+                progress.update(task_prepare, advance=100)
+                
                 # Enhanced interaction data with session context
                 interaction_data = {
                     "type": "user_message", 
@@ -1585,11 +1707,33 @@ How can I assist you today?"""
                     }
                 }
                 
+                # Step 2: Analyzing query context
+                task_analyze = progress.add_task("[yellow]🔍 Analyzing query context...", total=100)
+                progress.update(task_analyze, advance=100)
+                
+                # Step 3: Selecting optimal agent constellation
+                task_constellation = progress.add_task("[magenta]🌟 Selecting optimal agent constellation...", total=100)
+                progress.update(task_constellation, advance=100)
+                
+                # Step 4: Querying vector database for relevant knowledge
+                task_vectordb = progress.add_task("[blue]🗄️ Querying vector database for relevant knowledge...", total=100)
+                progress.update(task_vectordb, advance=100)
+                
+                # Step 5: Agent thinking and processing
+                task_thinking = progress.add_task("[green]🤔 Agent thinking and processing...", total=100)
+                progress.update(task_thinking, advance=50)
+                
                 # Process through Learning Hub with enhanced context
                 processed_response = self.learning_hub.process_interaction(
                     session_id=self.current_session.session_id,
                     interaction_data=interaction_data
                 )
+                
+                progress.update(task_thinking, advance=50)
+                
+                # Step 6: Generating response
+                task_response = progress.add_task("[bright_green]✨ Generating response...", total=100)
+                progress.update(task_response, advance=100)
 
                 # Enhanced response handling with proper extraction
                 response_content, agent_type, constellation_info = self._extract_agent_response(processed_response)
@@ -3389,6 +3533,228 @@ Just ask your question naturally - GAAPF will route it to the right specialist!
                         self.console.print(f"\n[success]✅ Memories for {framework_id} deleted.[/success]")
                 except Exception as e:
                     self.console.print(f"\n[error]❌ Error cleaning database: {e}[/error]")
+    
+    # Dynamic Capabilities Methods
+    def show_dynamic_capabilities_overview(self):
+        """Show dynamic capabilities overview with current status"""
+        if not self.dynamic_manager:
+            self.console.print("[error]Dynamic capabilities not initialized. Please restart the CLI.[/error]")
+            return
+        
+        # Create overview panel
+        overview_content = f"""
+[bold bright_blue]🚀 Dynamic Capabilities Status[/bold bright_blue]
+
+[bold]Current Integration Mode:[/bold] {self.integration_mode.value.title()}
+[bold]Dynamic Manager:[/bold] {'✅ Active' if self.dynamic_manager else '❌ Inactive'}
+
+[bold bright_green]Available Features:[/bold bright_green]
+• 🎯 Dynamic Constellation Generation
+• 🧠 Intelligent Parameter Calibration  
+• 💡 AI-Powered Recommendations
+• 📊 Performance Monitoring
+• 🔄 Adaptive Learning
+
+[bold bright_cyan]Quick Commands:[/bold bright_cyan]
+• `/generate` - Generate dynamic constellation
+• `/calibrate` - Calibrate parameters
+• `/recommend` - Get AI recommendations
+• `/mode` - Switch integration mode
+• `/performance` - View metrics
+        """
+        
+        overview_panel = Panel(
+            overview_content,
+            title="[bold bright_blue]🌟 Dynamic Capabilities[/bold bright_blue]",
+            style="bright_blue"
+        )
+        self.console.print(overview_panel)
+    
+    def generate_dynamic_constellation_interactive(self):
+        """Interactive dynamic constellation generation"""
+        if not self.dynamic_manager:
+            self.console.print("[error]Dynamic capabilities not initialized.[/error]")
+            return
+        
+        # Get context from user
+        context = Prompt.ask(
+            "[bold cyan]Enter learning context or topic[/bold cyan]",
+            default="Python programming fundamentals"
+        )
+        
+        with self.console.status("[info]Generating dynamic constellation...", spinner="dots"):
+            try:
+                constellation = self.dynamic_manager.get_constellation_with_dynamic_capabilities(
+                    context=context,
+                    user_profile=getattr(self.current_session, 'user_id', 'default') if self.current_session else 'default'
+                )
+                
+                if constellation:
+                    self.console.print(f"\n[success]✅ Generated constellation for: {context}[/success]")
+                    self.console.print(f"[info]Constellation ID: {constellation.constellation_id}[/info]")
+                    self.console.print(f"[info]Agents: {len(constellation.agents)}[/info]")
+                else:
+                    self.console.print("[warning]⚠️ Failed to generate constellation[/warning]")
+                    
+            except Exception as e:
+                self.console.print(f"[error]❌ Error generating constellation: {e}[/error]")
+    
+    def calibrate_parameters_interactive(self):
+        """Interactive parameter calibration"""
+        if not self.dynamic_manager:
+            self.console.print("[error]Dynamic capabilities not initialized.[/error]")
+            return
+        
+        # Get current session context
+        if not self.current_session:
+            self.console.print("[warning]No active session. Starting calibration with default parameters.[/warning]")
+            context = {"user_id": "default", "framework_id": "general"}
+        else:
+            context = {
+                "user_id": self.current_session.user_id,
+                "framework_id": self.current_session.framework_id,
+                "progress": self.current_session.progress_percentage
+            }
+        
+        with self.console.status("[info]Calibrating learning parameters...", spinner="dots"):
+            try:
+                calibrated_params = self.dynamic_manager.calibrate_learning_parameters(context)
+                
+                if calibrated_params:
+                    self.console.print("\n[success]✅ Parameters calibrated successfully![/success]")
+                    
+                    # Display calibrated parameters
+                    params_table = Table(title="📊 Calibrated Parameters", style="bright_green")
+                    params_table.add_column("Parameter", style="bold cyan")
+                    params_table.add_column("Value", style="white")
+                    
+                    for key, value in calibrated_params.items():
+                        params_table.add_row(key.replace('_', ' ').title(), str(value))
+                    
+                    self.console.print(params_table)
+                else:
+                    self.console.print("[warning]⚠️ Calibration returned no parameters[/warning]")
+                    
+            except Exception as e:
+                self.console.print(f"[error]❌ Error during calibration: {e}[/error]")
+    
+    def get_ai_recommendations_interactive(self):
+        """Interactive AI recommendations"""
+        if not self.dynamic_manager:
+            self.console.print("[error]Dynamic capabilities not initialized.[/error]")
+            return
+        
+        # Get context for recommendations
+        context_type = Prompt.ask(
+            "[bold cyan]What type of recommendations?[/bold cyan]",
+            choices=["learning", "practice", "assessment", "general"],
+            default="learning"
+        )
+        
+        context = {
+            "type": context_type,
+            "user_id": getattr(self.current_session, 'user_id', 'default') if self.current_session else 'default',
+            "framework_id": getattr(self.current_session, 'framework_id', 'general') if self.current_session else 'general'
+        }
+        
+        with self.console.status("[info]Generating AI recommendations...", spinner="dots"):
+            try:
+                recommendations = self.dynamic_manager.get_recommendations(context)
+                
+                if recommendations:
+                    self.console.print(f"\n[success]✅ Generated {len(recommendations)} recommendations![/success]")
+                    
+                    for i, rec in enumerate(recommendations, 1):
+                        rec_panel = Panel(
+                            f"[bold]{rec.get('title', f'Recommendation {i}')}[/bold]\n\n{rec.get('description', 'No description available')}",
+                            title=f"💡 Recommendation {i}",
+                            style="bright_yellow"
+                        )
+                        self.console.print(rec_panel)
+                else:
+                    self.console.print("[warning]⚠️ No recommendations generated[/warning]")
+                    
+            except Exception as e:
+                self.console.print(f"[error]❌ Error generating recommendations: {e}[/error]")
+    
+    def switch_integration_mode_interactive(self):
+        """Interactive integration mode switching"""
+        if not self.dynamic_manager:
+            self.console.print("[error]Dynamic capabilities not initialized.[/error]")
+            return
+        
+        # Show current mode
+        self.console.print(f"[info]Current mode: {self.integration_mode.value.title()}[/info]")
+        
+        # Get new mode
+        mode_choices = [mode.value for mode in IntegrationMode]
+        new_mode = Prompt.ask(
+            "[bold cyan]Select new integration mode[/bold cyan]",
+            choices=mode_choices,
+            default=self.integration_mode.value
+        )
+        
+        if new_mode != self.integration_mode.value:
+            try:
+                # Update mode
+                self.integration_mode = IntegrationMode(new_mode)
+                self.dynamic_manager.mode = self.integration_mode
+                
+                self.console.print(f"[success]✅ Switched to {new_mode.title()} mode![/success]")
+                
+                # Show mode description
+                mode_descriptions = {
+                    "hybrid": "Balanced approach with both traditional and dynamic features",
+                    "full_dynamic": "Maximum AI-driven adaptation and personalization",
+                    "enhanced_traditional": "Traditional approach with dynamic enhancements"
+                }
+                
+                description = mode_descriptions.get(new_mode, "Custom integration mode")
+                self.console.print(f"[info]{description}[/info]")
+                
+            except Exception as e:
+                self.console.print(f"[error]❌ Error switching mode: {e}[/error]")
+        else:
+            self.console.print("[info]Mode unchanged.[/info]")
+    
+    def show_dynamic_performance_metrics(self):
+        """Show dynamic performance metrics"""
+        if not self.dynamic_manager:
+            self.console.print("[error]Dynamic capabilities not initialized.[/error]")
+            return
+        
+        try:
+            # Get performance data from dynamic manager
+            performance_data = self.dynamic_manager.get_performance_metrics()
+            
+            if performance_data:
+                # Create metrics table
+                metrics_table = Table(title="📊 Dynamic Performance Metrics", style="bright_cyan")
+                metrics_table.add_column("Metric", style="bold white")
+                metrics_table.add_column("Value", style="bright_green")
+                metrics_table.add_column("Status", style="yellow")
+                
+                for metric, data in performance_data.items():
+                    value = data.get('value', 'N/A')
+                    status = data.get('status', 'Unknown')
+                    metrics_table.add_row(metric.replace('_', ' ').title(), str(value), status)
+                
+                self.console.print(metrics_table)
+                
+                # Show additional insights if available
+                insights = performance_data.get('insights', [])
+                if insights:
+                    insights_panel = Panel(
+                        "\n".join(f"• {insight}" for insight in insights),
+                        title="🔍 Performance Insights",
+                        style="bright_blue"
+                    )
+                    self.console.print(insights_panel)
+            else:
+                self.console.print("[warning]⚠️ No performance metrics available[/warning]")
+                
+        except Exception as e:
+            self.console.print(f"[error]❌ Error retrieving metrics: {e}[/error]")
 
 @async_debug_step
 async def main():

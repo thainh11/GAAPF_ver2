@@ -1,0 +1,41 @@
+{
+  "user_id": "user_e3669267",
+  "name": "Learner",
+  "email": "",
+  "experience_level": "beginner",
+  "learning_style": {
+    "interaction_style": "guided",
+    "pace": "moderate",
+    "detail_level": "balanced",
+    "preferred_mode": "balanced"
+  },
+  "goals": [],
+  "frameworks": [],
+  "progress": {},
+  "feedback_history": [],
+  "learning_analytics": {
+    "total_sessions": 0,
+    "total_interactions": 0,
+    "average_session_length": 0,
+    "preferred_learning_times": [],
+    "engagement_patterns": {},
+    "learning_velocity": "moderate",
+    "concept_mastery_rate": 0.0
+  },
+  "preferences": {
+    "notification_settings": {
+      "progress_updates": true,
+      "learning_reminders": true,
+      "achievement_notifications": true
+    },
+    "ui_preferences": {
+      "theme": "default",
+      "language": "en",
+      "accessibility_features": []
+    }
+  },
+  "last_session": "user_e3669267_autogen",
+  "last_session_time": 1753860648,
+  "created_at": 1752871396,
+  "last_updated": 1753860648
+}

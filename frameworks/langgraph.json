@@ -1,0 +1,40 @@
+{
+    "id": "langgraph",
+    "name": "LangGraph",
+    "description": "Framework for orchestrating agentic workflows with language models",
+    "version": "0.1.x",
+    "modules": {
+        "introduction": {
+            "title": "Introduction to LangGraph",
+            "description": "Overview of LangGraph and state machines for LLM orchestration",
+            "complexity": "basic",
+            "estimated_duration": 30,
+            "concepts": [
+                "State Machines",
+                "Graphs",
+                "Nodes",
+                "Edges"
+            ],
+            "prerequisites": []
+        }
+    },
+    "learning_paths": {
+        "default": {
+            "name": "Default Path",
+            "description": "Standard learning path",
+            "modules": [
+                "introduction"
+            ],
+            "target_experience": "beginner"
+        }
+    },
+    "metadata": {
+        "tags": [],
+        "category": "general",
+        "official_website": "",
+        "repository": ""
+    },
+    "starting_module": "introduction",
+    "created_at": 1753758977,
+    "updated_at": 1753758977
+}

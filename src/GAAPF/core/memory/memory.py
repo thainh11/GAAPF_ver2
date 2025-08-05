@@ -1,9 +1,11 @@
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Optional, Literal, Union
+from typing import Optional, Literal, Union, Dict, List
 import json
 import logging
 import time
+import threading
+from collections import defaultdict, deque
 from aucodb.graph import LLMGraphTransformer
 
 # Setup logging
@@ -25,12 +27,16 @@ class MemoryMeta(ABC):
         pass
 
 class Memory(MemoryMeta):
-    '''This stores the memory of the conversation.
+    '''Enhanced memory management with optimization and leak prevention.
     '''
     def __init__(self, 
             memory_path: Optional[Union[Path, str]] = Path('templates/memory.jsonl'), 
             is_reset_memory: bool=False,
             is_logging: bool=False,
+            max_memory_entries: int = 10000,
+            max_session_entries: int = 1000,
+            cleanup_threshold: float = 0.8,
+            cache_size: int = 100,
         *args, **kwargs):
         if isinstance(memory_path, str) and memory_path:
             self.memory_path = Path(memory_path)
@@ -39,53 +45,98 @@ class Memory(MemoryMeta):
         self.memory_path.parent.mkdir(parents=True, exist_ok=True)
         self.is_reset_memory = is_reset_memory
         self.is_logging = is_logging
+        
+        # Memory management settings
+        self.max_memory_entries = max_memory_entries
+        self.max_session_entries = max_session_entries
+        self.cleanup_threshold = cleanup_threshold
+        
+        # In-memory cache for frequently accessed data
+        self._memory_cache = {}
+        self._cache_timestamps = {}
+        self._cache_size = cache_size
+        self._cache_lock = threading.RLock()
+        
+        # Memory statistics tracking
+        self._memory_stats = defaultdict(lambda: {
+            'total_entries': 0,
+            'last_cleanup': time.time(),
+            'access_count': 0
+        })
+        
         if not self.memory_path.exists():
             self.memory_path.write_text(json.dumps({}, indent=4), encoding="utf-8")
         if self.is_reset_memory:
             self.memory_path.write_text(json.dumps({}, indent=4), encoding="utf-8")
+            self._clear_cache()
 
     def load_memory(self, load_type: Literal['list', 'string'] = 'list', user_id: str = None):
-        data = []
-        with open(self.memory_path, "r", encoding="utf-8") as f:
-                # for line in f:
-                #     try:
-                #         route = json.loads(line)
-                #         if route:
-                #             if user_id:
-                #                 if route['user_id'] == user_id:
-                #                     data.append(route)
-                #             else:
-                #                 data.append(route)
-                #     except json.JSONDecodeError as e:
-                #         logger.warning(
-                #             f"Skipping invalid JSON line: {line.strip()} - Error: {e}"
-                #         )
-
+        # Check cache first
+        cache_key = f"{user_id}_{load_type}" if user_id else f"all_{load_type}"
+        
+        with self._cache_lock:
+            if cache_key in self._memory_cache:
+                # Update access timestamp
+                self._cache_timestamps[cache_key] = time.time()
+                if self.is_logging:
+                    logger.debug(f"Cache hit for {cache_key}")
+                return self._memory_cache[cache_key]
+        
+        # Load from file if not in cache
+        try:
+            with open(self.memory_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-                if not user_id: # Load all memory
+                
+                if not user_id:  # Load all memory
                     data_user = data
                 else: 
-                    if user_id in data: # Load memory by user_id
+                    if user_id in data:  # Load memory by user_id
                         data_user = data[user_id]
+                        # Update access statistics
+                        self._memory_stats[user_id]['access_count'] += 1
                     else:
                         data_user = []
-
+        except (json.JSONDecodeError, FileNotFoundError) as e:
+            logger.error(f"Error loading memory: {e}")
+            data_user = [] if user_id else {}
+        
+        # Process data based on load_type
         if load_type == 'list':
-            return data_user
+            result = data_user
         elif load_type == 'string':
-            message = self.revert_object_mess(data_user)
-            return message
+            result = self.revert_object_mess(data_user) if isinstance(data_user, list) else ""
+        else:
+            result = data_user
+        
+        # Cache the result
+        self._update_cache(cache_key, result)
+        
+        return result
 
     def save_memory(self, obj: list, memory_path: Path, user_id: str):
+        # Check if cleanup is needed before saving
+        if len(obj) > self.max_memory_entries * self.cleanup_threshold:
+            obj = self._cleanup_old_entries(obj, user_id)
+        
         memory = self.load_memory(load_type='list')
         memory[user_id] = obj
-        with open(memory_path, "w", encoding="utf-8") as f:
-            # for item in obj:
-            #     f.write(json.dumps(item) + '\n')
-            json.dump(memory, f, indent=4, ensure_ascii=False)
-
-        if self.is_logging:
-            logger.info(f"Saved memory!")
+        
+        try:
+            with open(memory_path, "w", encoding="utf-8") as f:
+                json.dump(memory, f, indent=4, ensure_ascii=False)
+            
+            # Update statistics
+            self._memory_stats[user_id]['total_entries'] = len(obj)
+            
+            # Invalidate cache for this user
+            self._invalidate_user_cache(user_id)
+            
+            if self.is_logging:
+                logger.info(f"Saved {len(obj)} memory entries for user {user_id}")
+                
+        except Exception as e:
+            logger.error(f"Error saving memory: {e}")
+            raise
 
     def save_short_term_memory(self, llm, message, user_id, agent_type=None):
         """
@@ -357,6 +408,12 @@ class Memory(MemoryMeta):
                 del memory[user_id]
                 with open(self.memory_path, "w", encoding="utf-8") as f:
                     json.dump(memory, f, indent=4, ensure_ascii=False)
+                
+                # Clear user-specific cache and stats
+                self._invalidate_user_cache(user_id)
+                if user_id in self._memory_stats:
+                    del self._memory_stats[user_id]
+                
                 if self.is_logging:
                     logger.info(f"Cleared memory for user: {user_id}")
             else:
@@ -365,5 +422,95 @@ class Memory(MemoryMeta):
         else:
             with open(self.memory_path, "w", encoding="utf-8") as f:
                 json.dump({}, f, indent=4, ensure_ascii=False)
+            
+            # Clear all cache and stats
+            self._clear_cache()
+            self._memory_stats.clear()
+            
             if self.is_logging:
                 logger.info("Cleared all memory.")
+    
+    def _clear_cache(self):
+        """Clear all cached data."""
+        with self._cache_lock:
+            self._memory_cache.clear()
+            self._cache_timestamps.clear()
+    
+    def _invalidate_user_cache(self, user_id: str):
+        """Invalidate cache entries for a specific user."""
+        with self._cache_lock:
+            keys_to_remove = [key for key in self._memory_cache.keys() if key.startswith(f"{user_id}_")]
+            for key in keys_to_remove:
+                del self._memory_cache[key]
+                del self._cache_timestamps[key]
+    
+    def _update_cache(self, cache_key: str, data):
+        """Update cache with new data, managing cache size."""
+        with self._cache_lock:
+            # Remove oldest entries if cache is full
+            if len(self._memory_cache) >= self._cache_size:
+                oldest_key = min(self._cache_timestamps.keys(), key=lambda k: self._cache_timestamps[k])
+                del self._memory_cache[oldest_key]
+                del self._cache_timestamps[oldest_key]
+            
+            self._memory_cache[cache_key] = data
+            self._cache_timestamps[cache_key] = time.time()
+    
+    def _cleanup_old_entries(self, entries: List[Dict], user_id: str) -> List[Dict]:
+        """Clean up old memory entries to prevent memory bloat."""
+        if not entries:
+            return entries
+        
+        # Sort by timestamp (newest first)
+        sorted_entries = sorted(entries, key=lambda x: x.get('timestamp', 0), reverse=True)
+        
+        # Keep only the most recent entries within limit
+        cleaned_entries = sorted_entries[:self.max_memory_entries]
+        
+        # Update cleanup timestamp
+        self._memory_stats[user_id]['last_cleanup'] = time.time()
+        
+        if self.is_logging and len(cleaned_entries) < len(entries):
+            logger.info(f"Cleaned up {len(entries) - len(cleaned_entries)} old memory entries for user {user_id}")
+        
+        return cleaned_entries
+    
+    def get_cache_stats(self) -> Dict:
+        """Get cache performance statistics."""
+        with self._cache_lock:
+            return {
+                'cache_size': len(self._memory_cache),
+                'max_cache_size': self._cache_size,
+                'cache_keys': list(self._memory_cache.keys()),
+                'memory_stats': dict(self._memory_stats)
+            }
+    
+    def optimize_memory(self, user_id: str = None):
+        """Perform memory optimization and cleanup."""
+        if user_id:
+            # Optimize specific user's memory
+            memories = self.load_memory(load_type='list', user_id=user_id)
+            if memories and len(memories) > self.max_memory_entries * self.cleanup_threshold:
+                cleaned_memories = self._cleanup_old_entries(memories, user_id)
+                self.save_memory(cleaned_memories, self.memory_path, user_id)
+        else:
+            # Optimize all users' memory
+            all_memory = self.load_memory(load_type='list')
+            if isinstance(all_memory, dict):
+                for uid, memories in all_memory.items():
+                    if isinstance(memories, list) and len(memories) > self.max_memory_entries * self.cleanup_threshold:
+                        cleaned_memories = self._cleanup_old_entries(memories, uid)
+                        self.save_memory(cleaned_memories, self.memory_path, uid)
+        
+        # Clean up cache
+        current_time = time.time()
+        with self._cache_lock:
+            # Remove cache entries older than 1 hour
+            old_keys = [key for key, timestamp in self._cache_timestamps.items() 
+                       if current_time - timestamp > 3600]
+            for key in old_keys:
+                del self._memory_cache[key]
+                del self._cache_timestamps[key]
+        
+        if self.is_logging:
+            logger.info(f"Memory optimization completed for {'user ' + user_id if user_id else 'all users'}")

@@ -5,7 +5,7 @@ from pathlib import Path
 from . import SpecializedAgent
 from langchain_core.language_models.base import BaseLanguageModel
 from langchain_core.tools import BaseTool
-from GAAPF.prompts.documentation_expert import generate_system_prompt
+from ...prompts.documentation_expert import generate_system_prompt
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)

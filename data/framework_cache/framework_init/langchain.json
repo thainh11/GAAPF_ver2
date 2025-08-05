@@ -1,0 +1,56 @@
+{
+  "framework_name": "langchain",
+  "cached_at": 1752872714.0772598,
+  "data_version": "2025-07-19T04:05:09.260607",
+  "content_summary": {
+    "has_overview": false,
+    "concepts_count": 5,
+    "docs_count": 0,
+    "tutorials_count": 1,
+    "api_count": 0,
+    "examples_count": 0
+  },
+  "data": {
+    "framework_name": "langchain",
+    "collection_timestamp": "2025-07-19T04:05:09.260607",
+    "official_docs": {},
+    "github_info": {},
+    "tutorials": [
+      {
+        "title": "Stub search result",
+        "url": "https://example.com",
+        "snippet": "This is a stub search result. The actual search functionality is not implemented.",
+        "source": "tavily_search"
+      }
+    ],
+    "examples": [],
+    "api_reference": {},
+    "concepts": [
+      {
+        "name": "langchain",
+        "description": "The main langchain framework",
+        "source": "fallback"
+      },
+      {
+        "name": "Installation",
+        "description": "How to install langchain",
+        "source": "fallback"
+      },
+      {
+        "name": "Getting Started",
+        "description": "Basic langchain usage",
+        "source": "fallback"
+      },
+      {
+        "name": "API",
+        "description": "langchain API interface",
+        "source": "fallback"
+      },
+      {
+        "name": "Examples",
+        "description": "langchain usage examples",
+        "source": "fallback"
+      }
+    ]
+  }
+}

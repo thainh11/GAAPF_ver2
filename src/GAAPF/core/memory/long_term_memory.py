@@ -20,6 +20,10 @@ class VertexAIEmbeddingFunction(EmbeddingFunction):
 
     def __call__(self, input: List[str]) -> List[List[float]]:
         return self._embedding_func.embed_documents(input)
+    
+    def embed_query(self, query: str) -> List[float]:
+        """Embed a single query string."""
+        return self._embedding_func.embed_query(query)
 
 class LongTermMemory(Memory):
     """
@@ -50,10 +54,15 @@ class LongTermMemory(Memory):
         
         self.client_db = chromadb.PersistentClient(path=str(self.chroma_path))
         
+        # Set up credentials path for Vertex AI
+        import os
+        credentials_path = "d:\\Work2\\Do_an\\vinagent-main\\google-credentials.json"
+        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = credentials_path
+        
         # Use the LangChain VertexAIEmbeddings wrapped for ChromaDB
         langchain_vertex_embeddings = VertexAIEmbeddings(
             model_name=embedding_model,
-            project=project,
+            project=project or "gen-lang-client-0305686287",
             location=location
         )
         self.embedding_function = VertexAIEmbeddingFunction(langchain_vertex_embeddings)

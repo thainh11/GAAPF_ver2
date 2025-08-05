@@ -1,0 +1,42 @@
+{
+  "timestamp": 1752749658.9835536,
+  "monitoring_id": "monitor_1752749658",
+  "metrics": {
+    "system.uptime": {
+      "definition": {
+        "name": "system.uptime",
+        "metric_type": "MetricType.GAUGE",
+        "scope": "MonitoringScope.SYSTEM",
+        "description": "System uptime in seconds",
+        "unit": "seconds",
+        "tags": [],
+        "alert_thresholds": {},
+        "retention_days": 30,
+        "aggregation_window": 300
+      },
+      "values": [
+        {
+          "value": 0.06793498992919922,
+          "timestamp": 1752749658.9795551,
+          "tags": {}
+        }
+      ],
+      "aggregated": {
+        "count": 1,
+        "sum": 0.06793498992919922,
+        "avg": 0.06793498992919922,
+        "min": 0.06793498992919922,
+        "max": 0.06793498992919922,
+        "timestamp": 1752749658.9795551
+      }
+    },
+    "system.memory_usage": {
+      "definition": {
+        "name": "system.memory_usage",
+        "metric_type": "MetricType.GAUGE",
+        "scope": "MonitoringScope.SYSTEM",
+        "description": "Memory usage percentage",
+        "unit": "percent",
+        "tags": [],
+        "alert_thresholds": {
+          

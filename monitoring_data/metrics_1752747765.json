@@ -1,0 +1,62 @@
+{
+  "timestamp": 1752747765.0968456,
+  "monitoring_id": "monitor_1752747765",
+  "metrics": {
+    "system.uptime": {
+      "definition": {
+        "name": "system.uptime",
+        "metric_type": "MetricType.GAUGE",
+        "scope": "MonitoringScope.SYSTEM",
+        "description": "System uptime in seconds",
+        "unit": "seconds",
+        "tags": [],
+        "alert_thresholds": {},
+        "retention_days": 30,
+        "aggregation_window": 300
+      },
+      "values": [
+        {
+          "value": 0.02735614776611328,
+          "timestamp": 1752747765.0897388,
+          "tags": {}
+        }
+      ],
+      "aggregated": {
+        "count": 1,
+        "sum": 0.02735614776611328,
+        "avg": 0.02735614776611328,
+        "min": 0.02735614776611328,
+        "max": 0.02735614776611328,
+        "timestamp": 1752747765.0897388
+      }
+    }
+  },
+  "alerts": [],
+  "health": {
+    "overall_healthy": false,
+    "health_checks": {
+      "memory_usage": {
+        "healthy": false,
+        "last_check": null,
+        "consecutive_failures": 0,
+        "description": "Check system memory usage"
+      },
+      "disk_space": {
+        "healthy": false,
+        "last_check": null,
+        "consecutive_failures": 0,
+        "description": "Check available disk space"
+      },
+      "rl_system_responsive": {
+        "healthy": false,
+        "last_check": null,
+        "consecutive_failures": 0,
+        "description": "Check if RL system is responsive"
+      }
+    },
+    "active_alerts": 0,
+    "critical_alerts": 0,
+    "uptime": 0.034462928771972656,
+    "last_updated": 1752747765.0968456
+  }
+}

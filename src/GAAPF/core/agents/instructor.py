@@ -8,7 +8,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import BaseTool
 from ..graph.function_graph import node, NodeWrapper
 from langgraph.graph import END
-from GAAPF.prompts.instructor import generate_system_prompt
+from ...prompts.instructor import generate_system_prompt
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
