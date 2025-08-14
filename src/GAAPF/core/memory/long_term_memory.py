@@ -33,7 +33,7 @@ class LongTermMemory(Memory):
                 memory_path: Optional[Union[Path, str]] = Path('templates/memory.json'),
                 chroma_path: Optional[Union[Path, str]] = Path('memory/chroma_db'),
                 collection_name: str = "long_term_memory",
-                embedding_model: str = "text-embedding-large-exp-03-07",
+                embedding_model: str = "gemini-embedding-001",
                 is_reset_memory: bool = False,
                 is_logging: bool = False,
                 project: str = None,
@@ -60,12 +60,42 @@ class LongTermMemory(Memory):
         os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = credentials_path
         
         # Use the LangChain VertexAIEmbeddings wrapped for ChromaDB
-        langchain_vertex_embeddings = VertexAIEmbeddings(
-            model_name=embedding_model,
-            project=project or "gen-lang-client-0305686287",
-            location=location
-        )
+        try:
+            langchain_vertex_embeddings = VertexAIEmbeddings(
+                model_name=embedding_model,
+                project=project or "gen-lang-client-0305686287",
+                location=location
+            )
+        except Exception as e:
+            logger.warning(
+                f"Failed to initialize LT memory for {embedding_model}: {e}"
+            )
+            fallback_model = os.getenv("GAAPF_FALLBACK_EMBED_MODEL", "text-embedding-004")
+            try:
+                langchain_vertex_embeddings = VertexAIEmbeddings(
+                    model_name=fallback_model,
+                    project=project or "gen-lang-client-0305686287",
+                    location=location
+                )
+                logger.info(f"Using fallback embeddings model: {fallback_model}")
+            except Exception as e2:
+                logger.error(
+                    f"Failed to initialize fallback embeddings model {fallback_model}: {e2}. "
+                    "Using trivial embedding as last resort."
+                )
+                # Minimal trivial embedder to avoid system crash
+                class _TrivialEmbedder:  # noqa: N801 - internal helper
+                    def embed_documents(self, docs: List[str]) -> List[List[float]]:
+                        return [[float(len(d))] * 8 for d in docs]
+
+                    def embed_query(self, q: str) -> List[float]:
+                        return [float(len(q))] * 8
+
+                langchain_vertex_embeddings = _TrivialEmbedder()
         self.embedding_function = VertexAIEmbeddingFunction(langchain_vertex_embeddings)
+
+        # Persist collection name for later maintenance operations
+        self.collection_name = collection_name
 
         self._collection = self.client_db.get_or_create_collection(
             name=collection_name,

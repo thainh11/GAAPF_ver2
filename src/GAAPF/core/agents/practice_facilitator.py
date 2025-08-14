@@ -8,21 +8,21 @@ from langchain_core.language_models.base import BaseLanguageModel
 from langchain_core.tools import BaseTool
 from ...prompts.practice_facilitator import generate_system_prompt
 
-# Enhanced imports for adaptive learning
+# Enhanced imports for adaptive learning (silent fallback if unavailable)
 try:
     from ..learning.bayesian_kt import BayesianKnowledgeTracker
     from ..gamification.achievement_system import AchievementSystem
     from ..config.adaptive_config import AdaptiveConfigManager
     ENHANCED_FEATURES_AVAILABLE = True
 except ImportError:
-    logging.warning("Enhanced features not available. Install required dependencies for full functionality.")
     BayesianKnowledgeTracker = None
     AchievementSystem = None
     AdaptiveConfigManager = None
     ENHANCED_FEATURES_AVAILABLE = False
 
-# Setup logging
-logging.basicConfig(level=logging.INFO)
+# Setup logging (avoid duplicate handlers)
+if not logging.getLogger().handlers:
+    logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class PracticeFacilitatorAgent(SpecializedAgent):

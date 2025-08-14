@@ -163,6 +163,18 @@ class Memory(MemoryMeta):
                 if agent_type:
                     entry['agent_type'] = agent_type
                 entry['timestamp'] = time.time()
+        else:
+            # Fallback: persist a minimal entry so short-term memory is never empty
+            try:
+                graph = [{
+                    'head': user_id,
+                    'relation': 'said',
+                    'tail': str(message) if message is not None else '',
+                    'agent_type': agent_type if agent_type else 'unknown',
+                    'timestamp': time.time(),
+                }]
+            except Exception:
+                graph = []
         
         self.update_memory(graph, user_id)
         return graph
@@ -514,3 +526,47 @@ class Memory(MemoryMeta):
         
         if self.is_logging:
             logger.info(f"Memory optimization completed for {'user ' + user_id if user_id else 'all users'}")
+
+    def _chat_file_path(self, user_id: str, framework: Optional[str] = None) -> Path:
+        base_dir = self.memory_path.parent
+        fw = framework or "global"
+        return base_dir / f"chat_{user_id}_{fw}.jsonl"
+
+    def append_chat_message(self, user_id: str, role: str, content: str, framework: Optional[str] = None) -> None:
+        """Append a single chat message (role/content) to a per-user/per-framework JSONL file."""
+        try:
+            if not content:
+                return
+            record = {
+                "ts": time.time(),
+                "role": role,
+                "content": content,
+                "framework": framework or "global",
+            }
+            path = self._chat_file_path(user_id, framework)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with open(path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(record, ensure_ascii=False) + "\n")
+        except Exception as e:
+            if self.is_logging:
+                logger.warning(f"Failed to append chat message: {e}")
+
+    def get_recent_chat(self, user_id: str, framework: Optional[str] = None, k: int = 6) -> List[Dict]:
+        """Return the last k chat messages for a user/framework from transcript storage."""
+        try:
+            path = self._chat_file_path(user_id, framework)
+            if not path.exists():
+                return []
+            with open(path, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+            items = []
+            for line in lines[-k:]:
+                try:
+                    items.append(json.loads(line))
+                except Exception:
+                    continue
+            return items
+        except Exception as e:
+            if self.is_logging:
+                logger.warning(f"Failed to load recent chat: {e}")
+            return []

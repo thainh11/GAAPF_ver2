@@ -262,6 +262,28 @@ class DeepSearch:
         content = f"# I. Planning\n{plans}\n\n# II. Results\n{chapters}"
         return content
 
+# Module-level thin wrappers so the dynamic tool registry can locate expected functions
+def plan_node(state: AgentState):
+    return DeepSearch().plan_node(state)
+
+def generation_node(state: AgentState):
+    return DeepSearch().generation_node(state)
+
+def reflection_node(state: AgentState):
+    return DeepSearch().reflection_node(state)
+
+def research_critique_node(state: AgentState):
+    return DeepSearch().research_critique_node(state)
+
+def should_continue(state: AgentState):
+    return DeepSearch().should_continue(state)
+
+def find_section(text: str) -> bool:
+    return re.match("^\d+. ", text) is not None
+
+def find_query(text: str) -> bool:
+    return re.match("^\d+. ", text) is not None
+
 
 def deepsearch_tool(
     query: str,
@@ -289,6 +311,24 @@ def deepsearch_tool(
         max_revisions=max_revisions,
     )
     return content
+
+# Module-level wrapper to satisfy tools.json expectation
+def streaming_response(
+    query: str,
+    thread: TheadModel = {"configurable": {"thread_id": "1"}},
+    max_chapters: int = 5,
+    max_paragraphs_per_chapter: int = 5,
+    max_critical_queries: int = 5,
+    max_revisions: int = 1,
+):
+    return DeepSearch().streaming_response(
+        query=query,
+        thread=thread,
+        max_chapters=max_chapters,
+        max_paragraphs_per_chapter=max_paragraphs_per_chapter,
+        max_critical_queries=max_critical_queries,
+        max_revisions=max_revisions,
+    )
 
 
 # content = deepsearch_tool(

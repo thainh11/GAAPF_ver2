@@ -1,0 +1,152 @@
+{
+  "framework_name": "langchain",
+  "collection_timestamp": "2025-08-13T15:32:34.781178",
+  "official_docs": {
+    "main_url": "https://python.langchain.com/docs/integrations/tools/github/",
+    "title": "Github Toolkit - LangChain",
+    "snippet": "",
+    "pages": [
+      {
+        "url": "https://python.langchain.com/docs/tutorials/",
+        "title": "Tutorials",
+        "content_summary": "",
+        "is_api_reference": false
+      },
+      {
+        "url": "https://python.langchain.com/docs/how_to/",
+        "title": "How-to guides",
+        "content_summary": "",
+        "is_api_reference": false
+      },
+      {
+        "url": "https://python.langchain.com/docs/concepts/",
+        "title": "Conceptual guide - LangChain",
+        "content_summary": "",
+        "is_api_reference": false
+      },
+      {
+        "url": "https://js.langchain.com/docs/concepts/",
+        "title": "Conceptual guide - LangChain.js",
+        "content_summary": "",
+        "is_api_reference": false
+      },
+      {
+        "url": "https://api.python.langchain.com/en/latest/reference.html",
+        "title": "LangChain Python API Reference",
+        "content_summary": "",
+        "is_api_reference": true
+      },
+      {
+        "url": "https://python.langchain.com/api_reference/",
+        "title": "LangChain Python API Reference",
+        "content_summary": "",
+        "is_api_reference": true
+      },
+      {
+        "url": "https://python.langchain.com/api_reference/core/documents/langchain_core.documents.base.Document.html",
+        "title": "LangChain documentation",
+        "content_summary": "",
+        "is_api_reference": true
+      },
+      {
+        "url": "https://python.langchain.com/api_reference/langchain/index.html",
+        "title": "0.3.27 \u2014 LangChain documentation",
+        "content_summary": "",
+        "is_api_reference": true
+      }
+    ]
+  },
+  "github_info": {},
+  "tutorials": [
+    {
+      "title": "Tutorials - LangChain",
+      "url": "https://python.langchain.com/docs/tutorials/",
+      "snippet": "",
+      "source": "tavily_search"
+    },
+    {
+      "title": "How to Get Started with Langchain: A Beginner's Tutorial - Medium",
+      "url": "https://garysvenson09.medium.com/how-to-get-started-with-langchain-a-beginners-tutorial-9974ea030bf3",
+      "snippet": "",
+      "source": "tavily_search"
+    },
+    {
+      "title": "LangChain Master Class For Beginners 2024 [+20 Examples ...",
+      "url": "https://www.youtube.com/watch?v=yF9kGESAi3M",
+      "snippet": "",
+      "source": "tavily_search"
+    },
+    {
+      "title": "Build a simple LLM application with chat models and prompt templates",
+      "url": "https://python.langchain.com/docs/tutorials/llm_chain/",
+      "snippet": "",
+      "source": "tavily_search"
+    },
+    {
+      "title": "Learn LangChain in 7 Easy Steps - Full Interactive Beginner Tutorial",
+      "url": "https://www.youtube.com/watch?v=8BV9TW490nQ",
+      "snippet": "",
+      "source": "tavily_search"
+    }
+  ],
+  "examples": [],
+  "api_reference": {
+    "0.3.27 \u2014 \ud83e\udd9c\ud83d\udd17 LangChain documentation": {
+      "title": "0.3.27 \u2014 \ud83e\udd9c\ud83d\udd17 LangChain documentation",
+      "url": "https://python.langchain.com/api_reference/langchain/index.html",
+      "snippet": "",
+      "source": "tavily_search"
+    },
+    "LLMChain \u2014 \ud83e\udd9c\ud83d\udd17 LangChain documentation": {
+      "title": "LLMChain \u2014 \ud83e\udd9c\ud83d\udd17 LangChain documentation",
+      "url": "https://python.langchain.com/api_reference/langchain/chains/langchain.chains.llm.LLMChain.html",
+      "snippet": "",
+      "source": "tavily_search"
+    },
+    "LangChain Python API Reference": {
+      "title": "LangChain Python API Reference",
+      "url": "https://python.langchain.com/api_reference/",
+      "snippet": "",
+      "source": "tavily_search"
+    },
+    "LangChain": {
+      "title": "LangChain",
+      "url": "https://api.python.langchain.com/",
+      "snippet": "",
+      "source": "tavily_search"
+    },
+    "APIChain \u2014 \ud83e\udd9c\ud83d\udd17 LangChain documentation": {
+      "title": "APIChain \u2014 \ud83e\udd9c\ud83d\udd17 LangChain documentation",
+      "url": "https://python.langchain.com/api_reference/langchain/chains/langchain.chains.api.base.APIChain.html",
+      "snippet": "",
+      "source": "tavily_search"
+    }
+  },
+  "concepts": [
+    {
+      "name": "langchain",
+      "description": "The main langchain framework",
+      "source": "fallback"
+    },
+    {
+      "name": "Installation",
+      "description": "How to install langchain",
+      "source": "fallback"
+    },
+    {
+      "name": "Getting Started",
+      "description": "Basic langchain usage",
+      "source": "fallback"
+    },
+    {
+      "name": "API",
+      "description": "langchain API interface",
+      "source": "fallback"
+    },
+    {
+      "name": "Examples",
+      "description": "langchain usage examples",
+      "source": "fallback"
+    }
+  ]
+}

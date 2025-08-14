@@ -15,7 +15,7 @@ from langchain_core.tools import BaseTool
 from ..agents import SpecializedAgent
 from ..graph.constellation_graph import ConstellationGraph
 from .constellation_types import get_constellation_type, get_recommended_constellation_types
-from .learning_flow_orchestrator import LearningFlowOrchestrator
+# NOTE: Legacy import removed – module not present in simplified architecture
 from .orchestration import llm_orchestrate_agent
 
 # Setup logging

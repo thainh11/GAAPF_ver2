@@ -16,6 +16,7 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 from datetime import datetime
+import uuid
 
 # Rich imports for modern UI
 from rich.console import Console
@@ -34,6 +35,7 @@ from ...core.core.simple_hub import SimpleLearningHub
 from ...core.agents.instructor import InstructorAgent
 from ...core.agents.code_assistant import CodeAssistantAgent  
 from ...core.agents.practice_facilitator import PracticeFacilitatorAgent
+from ...core.agents.socratic_instructor import SocraticInstructorAgent
 
 # Simple theme for clean interface
 SIMPLE_THEME = Theme({
@@ -77,14 +79,9 @@ class SimpleCLI:
         self.console = Console(theme=SIMPLE_THEME)
         self.is_logging = is_logging
         
-        # Initialize 3 core agents only
-        self.agents = {
-            "instructor": InstructorAgent(llm, is_logging=is_logging),
-            "code_assistant": CodeAssistantAgent(llm, is_logging=is_logging),
-            "practice": PracticeFacilitatorAgent(llm, is_logging=is_logging)
-        }
-        
-        # Initialize simplified hub
+        # Defer agent creation to setup_session to avoid double init/logs
+        self.agents = {}
+        # Initialize simplified hub with empty agents (will be set later)
         self.hub = SimpleLearningHub(llm, self.agents, is_logging)
         
         # Session state
@@ -92,6 +89,8 @@ class SimpleCLI:
         self.study_mode = False
         self.session_start = datetime.now()
         self.interaction_count = 0
+        self.user_id = "default"
+        self.session_id = f"session_{uuid.uuid4().hex[:8]}"
         
         if self.is_logging:
             print(f"SimpleCLI initialized with {len(self.agents)} agents")
@@ -154,6 +153,35 @@ class SimpleCLI:
         
         # Set framework in hub
         self.hub.set_framework(self.current_framework)
+        # Ensure vectordb is populated for RAG
+        try:
+            from ...core.tools.framework_collector import FrameworkCollector
+            collector = FrameworkCollector(is_logging=self.is_logging)
+            stats = collector.ensure_ingested(self.current_framework, persistent_dir="data/frameworks/vectordb")
+            if self.is_logging:
+                self.console.print(f"(RAG init) {stats}", style="muted")
+        except Exception as e:
+            if self.is_logging:
+                self.console.print(f"(RAG init failed: {e})", style="muted")
+        # Rebuild agents with per-framework memory to keep context separated
+        from pathlib import Path as _Path
+        mem_file = _Path(f"templates/memory_{self.current_framework}.json")
+        self.agents = {
+            "instructor": InstructorAgent(self.llm, is_logging=self.is_logging, memory_path=mem_file),
+            "code_assistant": CodeAssistantAgent(self.llm, is_logging=self.is_logging, memory_path=mem_file),
+            "practice": PracticeFacilitatorAgent(self.llm, is_logging=self.is_logging, memory_path=mem_file),
+            "socratic_instructor": SocraticInstructorAgent(self.llm, is_logging=self.is_logging, memory_path=mem_file),
+        }
+        # Update hub agents reference
+        self.hub.agents = self.agents
+        
+        # Ask for user id to keep session consistent
+        try:
+            entered_id = Prompt.ask("\n👤 Enter your user id", default=self.user_id or "default").strip()
+            if entered_id:
+                self.user_id = entered_id
+        except Exception:
+            pass
         
         # Study mode preference
         use_study_mode = Confirm.ask(
@@ -170,6 +198,15 @@ class SimpleCLI:
     
     async def conversation_loop(self):
         """Main conversation loop with user."""
+        # Show guided opener once if history exists
+        try:
+            if self.hub.has_history(self.user_id):
+                opener = self.hub.generate_history_aware_opener(self.user_id, self.current_framework, self.study_mode)
+                if opener:
+                    self.console.print(Panel(opener, title="Welcome back", style="info"))
+        except Exception:
+            pass
+
         self.console.print(f"\n💭 **Ask me anything about {self.current_framework.title()}!**")
         self.console.print("💡 Type a command (starting with /) or ask a question", style="muted")
         
@@ -212,7 +249,7 @@ class SimpleCLI:
             context = {
                 "framework": self.current_framework,
                 "study_mode": self.study_mode,
-                "interaction_count": self.interaction_count
+                "interaction_count": self.interaction_count,
             }
             
             # Process query through hub
@@ -248,6 +285,8 @@ class SimpleCLI:
         # Show error if any
         if response.get("error") and self.is_logging:
             self.console.print(f"\n🔧 Debug: {response['error']}", style="muted")
+
+        # Do not auto-print last exchange after each response to reduce noise
     
     async def handle_command(self, command: str) -> bool:
         """
@@ -294,6 +333,29 @@ class SimpleCLI:
             
         elif cmd == "/help":
             self.show_welcome()
+        elif cmd == "/history":
+            # Show last 3 exchanges if available
+            try:
+                # Prefer transcript storage from any agent that has memory
+                # We'll look up via instructor if present
+                agent = self.hub.agents.get("instructor") or next(iter(self.hub.agents.values()))
+                recent = []
+                if getattr(agent, "memory", None):
+                    # Pull last 6 messages to display as 3 exchanges
+                    recent = agent.memory.get_recent_chat(user_id="default", framework=self.current_framework, k=6)
+                if not recent:
+                    self.console.print("(No recent history)", style="muted")
+                else:
+                    lines = []
+                    for item in recent[-6:]:
+                        role = item.get("role", "?")
+                        content = (item.get("content", "") or "")[:180]
+                        prefix = "You" if role == "user" else "AI"
+                        lines.append(f"{prefix}: {content}")
+                    self.console.print(Panel("\n".join(lines), title="Recent history", style="muted"))
+            except Exception as e:
+                if self.is_logging:
+                    self.console.print(f"(history unavailable: {e})", style="muted")
             
         elif cmd in ["/quit", "/exit", "/q"]:
             self.show_goodbye()
@@ -304,6 +366,10 @@ class SimpleCLI:
             self.console.print("💡 Type `/help` to see available commands", style="muted")
         
         return True
+
+    # Language detection is disabled; enforce English-only UI and prompts
+    def _detect_lang(self, text: str) -> str:
+        return "en"
     
     def show_session_info(self):
         """Display current session information."""

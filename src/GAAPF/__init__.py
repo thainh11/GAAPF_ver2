@@ -4,8 +4,8 @@ __version__ = "1.0.0"
 __author__ = "GAAPF Team"
 __email__ = "gaapf@example.com"
 
-# Import core components
-from .core import *
+# Lazy import core to avoid heavy side-effects during lightweight usage.
+# Downstream modules should import what they need explicitly from subpackages.
 
 __all__ = [
     # Version info

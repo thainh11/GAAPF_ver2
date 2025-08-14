@@ -5,7 +5,6 @@ This module provides tools for collecting comprehensive information about
 programming frameworks using web crawling and search technologies.
 """
 
-import os
 import json
 import logging
 import asyncio
@@ -21,11 +20,14 @@ logger = logging.getLogger(__name__)
 # Import existing tools
 from .websearch_tools import search_web
 from ..memory.long_term_memory import LongTermMemory
+from ..tools.vector_store import VectorStore
+from ..utils.async_helpers import run_sync
 
 # Try to import Tavily
 try:
     from tavily import TavilyClient
     TAVILY_AVAILABLE = True
+    logger.info("Tavily is available")
 except ImportError:
     TAVILY_AVAILABLE = False
     logger.warning("Tavily not available. Using fallback implementation.")
@@ -55,6 +57,13 @@ class FrameworkCollector:
         self.memory = memory
         self.cache_dir = Path(cache_dir) if isinstance(cache_dir, str) else cache_dir
         self.cache_dir.mkdir(parents=True, exist_ok=True)
+        # New: structured paths for easier control
+        # Raw JSON cache directory (new location)
+        self.raw_cache_dir = Path("data/frameworks/cache")
+        self.raw_cache_dir.mkdir(parents=True, exist_ok=True)
+        # Vector DB directory for per-framework docs (RAG)
+        self.vectordb_dir = Path("data/frameworks/vectordb")
+        self.vectordb_dir.mkdir(parents=True, exist_ok=True)
         self.is_logging = is_logging
         
         # Initialize Tavily client if API key is provided
@@ -64,6 +73,26 @@ class FrameworkCollector:
         
         if self.is_logging:
             logger.info(f"Initialized FrameworkCollector with cache at {self.cache_dir}")
+
+        # Allowed documentation domains per framework to keep sources authoritative
+        self.allowed_domains: Dict[str, List[str]] = {
+            "langchain": [
+                "python.langchain.com",
+                "langchain.com",
+            ],
+            "langgraph": [
+                "langchain-ai.github.io",
+            ],
+            "crewai": [
+                "docs.crewai.com",
+            ],
+            "autogen": [
+                "microsoft.github.io",
+            ],
+            "haystack": [
+                "docs.haystack.deepset.ai",
+            ],
+        }
     
     async def collect_framework_info(
         self,
@@ -88,14 +117,22 @@ class FrameworkCollector:
         Returns:
             Dictionary containing collected framework information
         """
-        # Check cache first if not forcing refresh
-        cache_file = self.cache_dir / f"{framework_name.lower().replace(' ', '_')}.json"
-        if not force_refresh and cache_file.exists():
-            with open(cache_file, "r") as f:
-                cached_data = json.load(f)
-                if self.is_logging:
-                    logger.info(f"Using cached information for {framework_name}")
-                return cached_data
+        # Check cache first if not forcing refresh (new path first, fallback to old)
+        cache_file_new = self.raw_cache_dir / f"{framework_name.lower().replace(' ', '_')}.json"
+        cache_file_old = self.cache_dir / f"{framework_name.lower().replace(' ', '_')}.json"
+        if not force_refresh:
+            if cache_file_new.exists():
+                with open(cache_file_new, "r", encoding="utf-8") as f:
+                    cached_data = json.load(f)
+                    if self.is_logging:
+                        logger.info(f"Using cached information (new path) for {framework_name}")
+                    return cached_data
+            if cache_file_old.exists():
+                with open(cache_file_old, "r", encoding="utf-8") as f:
+                    cached_data = json.load(f)
+                    if self.is_logging:
+                        logger.info(f"Using cached information (legacy path) for {framework_name}")
+                    return cached_data
         
         # Initialize results dictionary
         results = {
@@ -128,7 +165,10 @@ class FrameworkCollector:
                 results["github_info"]["snippet"] = snippet
                 # Extract more github info immediately
                 results["github_info"]["readme"] = snippet  # Use snippet as readme content
-            elif any(term in url.lower() for term in ["docs", "documentation", "guide", "tutorial"]) and not docs_url and include_docs:
+            elif (
+                any(term in url.lower() for term in ["docs", "documentation", "guide", "tutorial"]) and
+                not docs_url and include_docs and self._is_allowed_url(framework_name, url)
+            ):
                 docs_url = url
                 results["official_docs"]["main_url"] = url
                 results["official_docs"]["title"] = title
@@ -197,8 +237,9 @@ class FrameworkCollector:
         # Step 6: Extract concepts from collected information
         results["concepts"] = self._extract_concepts_from_results(results, framework_name)
         
-        # Step 7: Store in cache
-        with open(cache_file, "w") as f:
+        # Step 7: Store in cache (new path)
+        cache_file_new = self.raw_cache_dir / f"{framework_name.lower().replace(' ', '_')}.json"
+        with open(cache_file_new, "w", encoding="utf-8") as f:
             json.dump(results, f, indent=2)
         
         # Step 8: Store in long-term memory if available
@@ -206,9 +247,9 @@ class FrameworkCollector:
             self._store_in_memory(results, user_id, framework_name)
         
         return results
-    
+
     async def _extract_documentation(self, docs_url: str, framework_name: str) -> Dict:
-        """Extract content from the framework's official documentation"""
+        """Extract content from the framework's official documentation and discover key pages."""
         # Use Tavily extract API if available
         if self.tavily_client:
             try:
@@ -224,13 +265,13 @@ class FrameworkCollector:
                 }
             except Exception as e:
                 logger.error(f"Error using Tavily extract API: {e}")
-        
+
         # Fallback to search for more documentation pages
         docs_info = {
             "main_url": docs_url,
             "pages": []
         }
-        
+
         # Search for specific documentation pages
         search_terms = [
             f"{framework_name} getting started guide",
@@ -239,22 +280,25 @@ class FrameworkCollector:
             f"{framework_name} examples documentation",
             f"{framework_name} advanced usage guide"
         ]
-        
+
         for term in search_terms:
             search_results = search_web(term, num_results=2)
             for result in search_results.get("results", []):
+                url = result.get("url", "")
+                if not self._is_allowed_url(framework_name, url):
+                    continue
                 page_info = {
-                    "url": result.get("url", ""),
+                    "url": url,
                     "title": result.get("title", ""),
                     "content_summary": result.get("snippet", ""),
-                    "is_api_reference": any(term in result.get("url", "").lower() for term in ["api", "reference", "class", "method", "function"])
+                    "is_api_reference": any(t in url.lower() for t in ["api", "reference", "class", "method", "function"])
                 }
                 docs_info["pages"].append(page_info)
-        
+
         return docs_info
-    
+
     async def _extract_github_repo(self, github_url: str, framework_name: str) -> Dict:
-        """Extract information from the framework's GitHub repository"""
+        """Extract information from the framework's GitHub repository."""
         # Use Tavily extract API if available
         if self.tavily_client:
             try:
@@ -266,19 +310,19 @@ class FrameworkCollector:
                 }
             except Exception as e:
                 logger.error(f"Error using Tavily extract API: {e}")
-        
+
         # Fallback to search for GitHub information
         github_info = {
             "url": github_url,
             "readme": "",
             "examples": []
         }
-        
+
         # Search for README content
         readme_results = search_web(f"{framework_name} github readme", num_results=1)
         if readme_results.get("results"):
             github_info["readme"] = readme_results["results"][0].get("snippet", "")
-        
+
         # Search for examples
         examples_results = search_web(f"{framework_name} github examples", num_results=3)
         for result in examples_results.get("results", []):
@@ -287,9 +331,9 @@ class FrameworkCollector:
                     "url": result.get("url", ""),
                     "title": result.get("title", "")
                 })
-        
+
         return github_info
-    
+        
     def _extract_example_links(self, content: str) -> List[Dict]:
         """Extract example links from GitHub content"""
         examples = []
@@ -478,6 +522,224 @@ class FrameworkCollector:
                 source=f"framework_collection_{framework_name}",
                 metadata={"framework": framework_name, "type": "api", "api_name": api_name}
             )
+
+    def ingest_official_docs(
+        self,
+        framework_name: str,
+        project: Optional[str] = None,
+        location: Optional[str] = None,
+        persistent_dir: Optional[Union[str, Path]] = None,
+        force_refresh: bool = False,
+    ) -> Dict[str, Any]:
+        """
+        Ingest official documentation snippets into a per-framework VectorStore collection.
+
+        Returns minimal stats: {"framework": str, "collection": str, "added": int}
+        """
+        framework_id = framework_name.lower().replace(" ", "_")
+        collection_name = f"framework_docs_{framework_id}"
+
+        # Collect docs info (uses cache unless force_refresh)
+        info = run_sync(self.collect_framework_info(
+            framework_name=framework_name,
+            user_id="system_ingest",
+            include_github=False,
+            include_docs=True,
+            max_pages=10,
+            force_refresh=force_refresh,
+        ))
+
+        pages = (info.get("official_docs", {}) or {}).get("pages", [])
+        main_snippet = (info.get("official_docs", {}) or {}).get("snippet", "")
+        main_url = (info.get("official_docs", {}) or {}).get("main_url", "")
+
+        documents: List[Dict[str, Any]] = []
+        # Add main page snippet if present
+        if main_snippet:
+            documents.append({
+                "text": main_snippet,
+                "metadata": {
+                    "framework": framework_id,
+                    "url": main_url,
+                    "title": info.get("official_docs", {}).get("title", ""),
+                    "source": "official_docs",
+                }
+            })
+
+        # Add each page's content_summary
+        for p in pages:
+            text = (p.get("content_summary") or "").strip()
+            url = p.get("url", "")
+            if not text or not self._is_allowed_url(framework_name, url):
+                continue
+            documents.append({
+                "text": text,
+                "metadata": {
+                    "framework": framework_id,
+                    "url": url,
+                    "title": p.get("title", ""),
+                    "source": "official_docs",
+                    "is_api_reference": bool(p.get("is_api_reference")),
+                }
+            })
+
+        if not documents:
+            # Fallback: build minimal documents from tutorials/api_reference snippets to avoid empty DB
+            for tutorial in info.get("tutorials", [])[:5]:
+                snippet = (tutorial.get("snippet") or "").strip()
+                url = tutorial.get("url", "")
+                if not snippet:
+                    continue
+                documents.append({
+                    "text": snippet,
+                    "metadata": {
+                        "framework": framework_id,
+                        "url": url,
+                        "title": tutorial.get("title", "Tutorial"),
+                        "source": "tutorial"
+                    }
+                })
+            for api_name, api in list(info.get("api_reference", {}).items())[:5]:
+                snippet = (api.get("snippet") or "").strip()
+                url = api.get("url", "")
+                if not snippet:
+                    continue
+                documents.append({
+                    "text": snippet,
+                    "metadata": {
+                        "framework": framework_id,
+                        "url": url,
+                        "title": api.get("title", api_name),
+                        "source": "api_reference"
+                    }
+                })
+            if not documents:
+                return {"framework": framework_id, "collection": collection_name, "added": 0}
+
+        # Upsert into per-framework VectorStore (separate folder per framework)
+        vs_base = Path(persistent_dir) if isinstance(persistent_dir, (str, Path)) and persistent_dir else Path(self.vectordb_dir)
+        vs_dir_path = vs_base / framework_id
+        try:
+            vs_dir_path.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
+        vs = VectorStore(
+            persistent_dir=str(vs_dir_path),
+            collection_name=collection_name,
+            project=project,
+            location=location or "us-central1",
+        )
+        ids = vs.add_documents(documents)
+        return {"framework": framework_id, "collection": collection_name, "added": len(ids)}
+
+    def ensure_ingested(
+        self,
+        framework_name: str,
+        project: Optional[str] = None,
+        location: Optional[str] = None,
+        persistent_dir: Optional[Union[str, Path]] = None,
+    ) -> Dict[str, Any]:
+        """Ensure a per-framework collection exists with data; ingest if empty."""
+        framework_id = framework_name.lower().replace(" ", "_")
+        collection_name = f"framework_docs_{framework_id}"
+        vs_base = Path(persistent_dir) if isinstance(persistent_dir, (str, Path)) and persistent_dir else Path(self.vectordb_dir)
+        vs_dir_path = vs_base / framework_id
+        try:
+            vs_dir_path.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
+        vs = VectorStore(
+            persistent_dir=str(vs_dir_path),
+            collection_name=collection_name,
+            project=project,
+            location=location or "us-central1",
+        )
+        if vs.count() > 0:
+            return {"framework": framework_id, "collection": collection_name, "added": 0, "exists": True}
+        return self.ingest_official_docs(
+            framework_name=framework_name,
+            project=project,
+            location=location,
+            persistent_dir=str(vs_dir_path),
+            force_refresh=True,
+        )
+
+    def _is_allowed_url(self, framework_name: str, url: str) -> bool:
+        try:
+            if not url:
+                return False
+            fw = framework_name.lower()
+            domains = self.allowed_domains.get(fw, [])
+            return any(domain in url for domain in domains) or (not domains)
+        except Exception:
+            return False
+
+# Expose methods as module-level callables to align with tools.json entries
+# These thin wrappers allow dynamic tool loader to find functions by name
+
+def _extract_documentation(docs_url: str, framework_name: str) -> Dict:  # pyright: ignore[reportUnusedFunction]
+    collector = FrameworkCollector(is_logging=False)
+    return run_sync(collector._extract_documentation(docs_url, framework_name))
+
+def _extract_github_repo(github_url: str, framework_name: str) -> Dict:  # pyright: ignore[reportUnusedFunction]
+    collector = FrameworkCollector(is_logging=False)
+    return run_sync(collector._extract_github_repo(github_url, framework_name))
+
+def _extract_example_links(content: str) -> List[Dict]:  # pyright: ignore[reportUnusedFunction]
+    collector = FrameworkCollector(is_logging=False)
+    return collector._extract_example_links(content)
+
+def _extract_concepts_from_text(text: str, framework_name: str) -> List[Dict]:  # pyright: ignore[reportUnusedFunction]
+    collector = FrameworkCollector(is_logging=False)
+    return collector._extract_concepts_from_text(text, framework_name)
+
+def _extract_concepts_from_results(results: Dict, framework_name: str) -> List[Dict]:  # pyright: ignore[reportUnusedFunction]
+    collector = FrameworkCollector(is_logging=False)
+    return collector._extract_concepts_from_results(results, framework_name)
+
+def _store_in_memory(framework_data: Dict, user_id: str, framework_name: str):  # pyright: ignore[reportUnusedFunction]
+    collector = FrameworkCollector(is_logging=False)
+    # Only store if a memory was provided in constructor; otherwise no-op
+    try:
+        collector._store_in_memory(framework_data, user_id, framework_name)
+    except Exception:
+        return None
+
+async def collect_framework_info(
+    framework_name: str,
+    user_id: str,
+    include_github: bool = True,
+    include_docs: bool = True,
+    max_pages: int = 50,
+    force_refresh: bool = False,
+):
+    collector = FrameworkCollector(is_logging=True)
+    return await collector.collect_framework_info(
+        framework_name=framework_name,
+        user_id=user_id,
+        include_github=include_github,
+        include_docs=include_docs,
+        max_pages=max_pages,
+        force_refresh=force_refresh,
+    )
+
+def FrameworkCollector_collect_framework_info(
+    framework_name: str,
+    user_id: str,
+    include_github: bool = True,
+    include_docs: bool = True,
+    max_pages: int = 50,
+    force_refresh: bool = False,
+):
+    """Sync wrapper to satisfy tools.json alias naming convention."""
+    return run_sync(collect_framework_info(
+        framework_name=framework_name,
+        user_id=user_id,
+        include_github=include_github,
+        include_docs=include_docs,
+        max_pages=max_pages,
+        force_refresh=force_refresh,
+    ))
 
 async def initialize_framework_knowledge(
     framework_name: str,

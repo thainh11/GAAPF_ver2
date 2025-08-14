@@ -1,0 +1,50 @@
+{
+  "user_id": "default",
+  "name": "Learner",
+  "created_at": "2025-08-05T19:36:13.628262+00:00",
+  "last_active": "2025-08-07T03:07:15.686553+00:00",
+  "preferences": {
+    "study_mode_preferred": true,
+    "difficulty_level": "intermediate",
+    "learning_style": "balanced",
+    "feedback_style": "encouraging"
+  },
+  "learning_progress": {
+    "frameworks": {
+      "langchain": {
+        "total_interactions": 2,
+        "quizzes_completed": 0,
+        "average_score": 0.0,
+        "concepts_learned": [],
+        "last_activity": "2025-08-07T03:07:15.678739+00:00"
+      }
+    },
+    "concepts_mastered": [],
+    "concepts_struggling": [],
+    "total_interactions": 2,
+    "study_sessions": 0
+  },
+  "quiz_history": {
+    "total_quizzes": 0,
+    "total_questions": 0,
+    "correct_answers": 0,
+    "average_score": 0.0,
+    "recent_scores": [],
+    "topics_mastered": [],
+    "topics_need_review": []
+  },
+  "code_metrics": {
+    "code_snippets_generated": 0,
+    "tests_passed": 0,
+    "bugs_fixed": 0,
+    "average_quality": 0.0,
+    "recent_generations": [],
+    "recent_fixes": []
+  },
+  "achievements": [],
+  "settings": {
+    "notifications": true,
+    "progress_tracking": true,
+    "adaptive_difficulty": true
+  }
+}

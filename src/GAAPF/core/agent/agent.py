@@ -572,6 +572,27 @@ class Agent(AgentMeta):
                             messages.extend(history_messages)
                             if self.is_logging:
                                 logger.info(f"✅ Loaded {len(history_messages)} messages from memory")
+                            # Also load recent transcript (role/content) for continuity
+                            try:
+                                framework_id = (learning_context or {}).get("framework")
+                                recent_chat = self.memory.get_recent_chat(user_id=self._user_id, framework=framework_id, k=6)
+                                if recent_chat:
+                                    for item in recent_chat:
+                                        role = (item.get("role") or "").lower()
+                                        content = item.get("content", "")
+                                        if not content:
+                                            continue
+                                        if role == "user":
+                                            messages.append(HumanMessage(content=content))
+                                        else:
+                                            messages.append(AIMessage(content=content))
+                                    # Expose recent messages back to context for downstream use
+                                    try:
+                                        learning_context["messages"] = recent_chat  # type: ignore[index]
+                                    except Exception:
+                                        pass
+                            except Exception:
+                                pass
                         except Exception as e:
                             logger.error(f"❌ Failed to load memory messages: {e}")
 
@@ -598,6 +619,12 @@ class Agent(AgentMeta):
             # Save user message to memory with error handling
             if self.memory and is_save_memory:
                 try:
+                    # Append transcript for UI continuity
+                    try:
+                        framework_id = (learning_context or {}).get("framework")
+                        self.memory.append_chat_message(self._user_id, role="user", content=query, framework=framework_id)
+                    except Exception:
+                        pass
                     self.save_memory(HumanMessage(content=query), user_id=self._user_id)
                     if self.is_logging:
                         logger.info("💾 Saved user message to memory")
@@ -660,6 +687,12 @@ class Agent(AgentMeta):
                     if not tool_data or ("None" in tool_data) or (tool_data == "{}"):
                         if self.memory and is_save_memory:
                             try:
+                                # Append transcript of assistant reply
+                                try:
+                                    framework_id = (learning_context or {}).get("framework")
+                                    self.memory.append_chat_message(self._user_id, role="assistant", content=response.content, framework=framework_id)
+                                except Exception:
+                                    pass
                                 self.save_memory(response, user_id=self._user_id)
                                 if self.is_logging:
                                     logger.info("💾 Saved direct response to memory")
@@ -708,6 +741,13 @@ class Agent(AgentMeta):
                         
                         if self.memory and is_save_memory:
                             try:
+                                # Append transcript of tool response
+                                try:
+                                    framework_id = (learning_context or {}).get("framework")
+                                    content_text = getattr(tool_message, 'content', str(tool_message))
+                                    self.memory.append_chat_message(self._user_id, role="assistant", content=content_text, framework=framework_id)
+                                except Exception:
+                                    pass
                                 self.save_memory(tool_message, user_id=self._user_id)
                                 if self.is_logging:
                                     logger.info("💾 Saved tool response to memory")

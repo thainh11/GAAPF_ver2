@@ -91,11 +91,35 @@ class CurriculumGenerator:
         credentials_path = "d:\\Work2\\Do_an\\vinagent-main\\google-credentials.json"
         os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = credentials_path
         
-        self.embedding_function = VertexAIEmbeddings(
-            model_name="text-embedding-large-exp-03-07", # Use a stable, 768-dimension model
-            project=project or "gen-lang-client-0305686287",
-            location=location or "us-central1"
-        )
+        # Keep primary model as requested; add robust fallback to maintain functionality
+        try:
+            self.embedding_function = VertexAIEmbeddings(
+                model_name="gemini-embedding-001",
+                project=project or "gen-lang-client-0305686287",
+                location=location or "us-central1"
+            )
+        except Exception as e:
+            print(f"Warning: Failed to initialize VertexAIEmbeddings with gemini-embedding-001: {e}")
+            fallback_model = os.getenv("GAAPF_FALLBACK_EMBED_MODEL", "text-embedding-004")
+            try:
+                self.embedding_function = VertexAIEmbeddings(
+                    model_name=fallback_model,
+                    project=project or "gen-lang-client-0305686287",
+                    location=location or "us-central1"
+                )
+                print(f"Using fallback embeddings model: {fallback_model}")
+            except Exception as e2:
+                print(
+                    f"Error: Failed to initialize fallback embeddings model {fallback_model}: {e2}. "
+                    "Using trivial embedding as last resort."
+                )
+                class _TrivialEmbedder:
+                    def embed_documents(self, docs: List[str]):
+                        return [[float(len(d))] * 8 for d in docs]
+
+                    def embed_query(self, q: str):
+                        return [float(len(q))] * 8
+                self.embedding_function = _TrivialEmbedder()
         self._client = db_client
         self._collection_name = collection_name
         

@@ -1,0 +1,221 @@
+{
+    "unknown_user": [
+        {
+            "head": "unknown_user",
+            "relation": "said",
+            "tail": "hellooo",
+            "agent_type": "socratic_instructor",
+            "timestamp": 1755167158.7455342
+        },
+        {
+            "head": "applications",
+            "head_type": "Product",
+            "relation": "USES_TECHNOLOGY",
+            "relation_properties": "building",
+            "tail": "AI",
+            "tail_type": "Technology",
+            "agent_type": "socratic_instructor",
+            "timestamp": 1755167173.9110937
+        },
+        {
+            "head": "LangChain",
+            "head_type": "Framework",
+            "relation": "IS_EXAMPLE_OF",
+            "relation_properties": "like",
+            "tail": "AI development frameworks",
+            "tail_type": "Category",
+            "agent_type": "socratic_instructor",
+            "timestamp": 1755167173.9110937
+        },
+        {
+            "head": "AI development frameworks",
+            "head_type": "Category",
+            "relation": "FOR_TECHNOLOGY",
+            "relation_properties": "development",
+            "tail": "AI",
+            "tail_type": "Technology",
+            "agent_type": "socratic_instructor",
+            "timestamp": 1755167173.9110937
+        },
+        {
+            "head": "project",
+            "head_type": "Concept",
+            "relation": "RELATED_TO",
+            "relation_properties": "or",
+            "tail": "problem",
+            "tail_type": "Concept",
+            "agent_type": "socratic_instructor",
+            "timestamp": 1755167173.9110937
+        },
+        {
+            "head": "I",
+            "head_type": "Person",
+            "relation": "WANTS_TO_LEARN",
+            "relation_properties": "first",
+            "tail": "synatx basic",
+            "tail_type": "Skill",
+            "agent_type": "socratic_instructor",
+            "timestamp": 1755167315.4428766
+        },
+        {
+            "head": "I",
+            "head_type": "Person",
+            "relation": "WANTS_TO_BUILD",
+            "relation_properties": "then",
+            "tail": "small chatbot",
+            "tail_type": "Product",
+            "agent_type": "socratic_instructor",
+            "timestamp": 1755167315.4428766
+        },
+        {
+            "head": "Module 1: LangChain Fundamentals",
+            "head_type": "Course Module",
+            "relation": "COVERS_TOPIC",
+            "relation_properties": "",
+            "tail": "LangChain Fundamentals",
+            "tail_type": "Concept",
+            "agent_type": "socratic_instructor",
+            "timestamp": 1755167355.5936246
+        },
+        {
+            "head": "Module 1: LangChain Fundamentals",
+            "head_type": "Course Module",
+            "relation": "COVERS_TOPIC",
+            "relation_properties": "",
+            "tail": "core concepts",
+            "tail_type": "Concept",
+            "agent_type": "socratic_instructor",
+            "timestamp": 1755167355.5936246
+        },
+        {
+            "head": "LangChain Fundamentals",
+            "head_type": "Concept",
+            "relation": "IS_ABOUT",
+            "relation_properties": "",
+            "tail": "LangChain",
+            "tail_type": "Software",
+            "agent_type": "socratic_instructor",
+            "timestamp": 1755167355.5936246
+        },
+        {
+            "head": "Module 2: Understanding LangChain's Core APIs and Chains",
+            "head_type": "Course Module",
+            "relation": "COVERS_TOPIC",
+            "relation_properties": "",
+            "tail": "Core APIs and Chains",
+            "tail_type": "Concept",
+            "agent_type": "socratic_instructor",
+            "timestamp": 1755167355.5936246
+        },
+        {
+            "head": "Module 2: Understanding LangChain's Core APIs and Chains",
+            "head_type": "Course Module",
+            "relation": "COVERS_TOPIC",
+            "relation_properties": "",
+            "tail": "LangChain APIs",
+            "tail_type": "Concept",
+            "agent_type": "socratic_instructor",
+            "timestamp": 1755167355.5936246
+        },
+        {
+            "head": "Module 2: Understanding LangChain's Core APIs and Chains",
+            "head_type": "Course Module",
+            "relation": "COVERS_TOPIC",
+            "relation_properties": "",
+            "tail": "chain structures",
+            "tail_type": "Concept",
+            "agent_type": "socratic_instructor",
+            "timestamp": 1755167355.5936246
+        },
+        {
+            "head": "LangChain APIs",
+            "head_type": "Concept",
+            "relation": "IS_PART_OF",
+            "relation_properties": "",
+            "tail": "Core APIs and Chains",
+            "tail_type": "Concept",
+            "agent_type": "socratic_instructor",
+            "timestamp": 1755167355.5936246
+        },
+        {
+            "head": "chain structures",
+            "head_type": "Concept",
+            "relation": "IS_PART_OF",
+            "relation_properties": "",
+            "tail": "Core APIs and Chains",
+            "tail_type": "Concept",
+            "agent_type": "socratic_instructor",
+            "timestamp": 1755167355.5936246
+        },
+        {
+            "head": "Module 3: Practical Application and Examples",
+            "head_type": "Course Module",
+            "relation": "PROVIDES",
+            "relation_properties": "",
+            "tail": "practical examples",
+            "tail_type": "Resource",
+            "agent_type": "socratic_instructor",
+            "timestamp": 1755167355.5936246
+        },
+        {
+            "head": "Module 3: Practical Application and Examples",
+            "head_type": "Course Module",
+            "relation": "TEACHES_APPLICATION_OF",
+            "relation_properties": "",
+            "tail": "LangChain APIs",
+            "tail_type": "Concept",
+            "agent_type": "socratic_instructor",
+            "timestamp": 1755167355.5936246
+        },
+        {
+            "head": "Module 3: Practical Application and Examples",
+            "head_type": "Course Module",
+            "relation": "TEACHES_APPLICATION_OF",
+            "relation_properties": "",
+            "tail": "chain structures",
+            "tail_type": "Concept",
+            "agent_type": "socratic_instructor",
+            "timestamp": 1755167355.5936246
+        },
+        {
+            "head": "Module 3: Practical Application and Examples",
+            "head_type": "Course Module",
+            "relation": "TEACHES_TO_BUILD",
+            "relation_properties": "",
+            "tail": "Small Chatbot",
+            "tail_type": "Application",
+            "agent_type": "socratic_instructor",
+            "timestamp": 1755167355.5936246
+        },
+        {
+            "head": "Small Chatbot",
+            "head_type": "Application",
+            "relation": "IS_BUILT_USING",
+            "relation_properties": "",
+            "tail": "LangChain APIs",
+            "tail_type": "Concept",
+            "agent_type": "socratic_instructor",
+            "timestamp": 1755167355.5936246
+        },
+        {
+            "head": "Small Chatbot",
+            "head_type": "Application",
+            "relation": "IS_BUILT_USING",
+            "relation_properties": "",
+            "tail": "chain structures",
+            "tail_type": "Concept",
+            "agent_type": "socratic_instructor",
+            "timestamp": 1755167355.5936246
+        },
+        {
+            "head": "Small Chatbot",
+            "head_type": "Application",
+            "relation": "IS_BUILT_USING",
+            "relation_properties": "",
+            "tail": "practical examples",
+            "tail_type": "Resource",
+            "agent_type": "socratic_instructor",
+            "timestamp": 1755167355.5936246
+        }
+    ]
+}

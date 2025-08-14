@@ -11,9 +11,14 @@ PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..
 sys.path.insert(0, PROJECT_ROOT)
 
 from src.GAAPF.core.tools.framework_collector import FrameworkCollector
+try:
+    import importlib
+    import src.GAAPF.core.tools.framework_collector as fc_mod
+    print(f"Using FrameworkCollector module: {getattr(fc_mod, '__file__', 'unknown')}" )
+except Exception:
+    pass
 from src.GAAPF.core.memory.long_term_memory import LongTermMemory
 from src.GAAPF.core.curriculum.generator import CurriculumGenerator
-import chromadb
 
 
 async def main():
@@ -35,17 +40,10 @@ async def main():
     print(f"Found frameworks to initialize: {', '.join(framework_names)}")
 
     # Initialize memory and collector
-    # Using a consistent path for the vectordb
-    db_path = Path(__file__).parent.parent.parent / "data" / "framework_cache" / "chroma_db"
+    # New organized vectordb base path
+    db_path = Path(__file__).parent.parent.parent / "data" / "frameworks" / "vectordb"
     
-    # Clean the database directory before starting
-    if db_path.exists():
-        if db_path.is_dir():
-            shutil.rmtree(db_path)
-            print(f"Cleaned old database directory at {db_path}")
-        else:
-            db_path.unlink()
-            print(f"Cleaned old database file at {db_path}")
+    # Do not wipe existing DB; we want to preserve previous ingests.
 
     # The memory class will create the directory using Vertex AI embeddings
     memory = LongTermMemory(
@@ -60,28 +58,42 @@ async def main():
     for framework_name in framework_names:
         print(f"--- Initializing knowledge for: {framework_name} ---")
         try:
-            # Step 1: Collect comprehensive information about the framework.
-            # This will use web searches and store the results in a cache file.
-            framework_info = await collector.collect_framework_info(
-                framework_name=framework_name,
-                user_id=user_id,
-                max_pages=10,  # Using a moderate number of pages for initial setup
-                force_refresh=True # We want to ensure fresh data during setup
-            )
-
-            # Step 2: The collector already stores the info in memory via _store_in_memory
-            # which is called by collect_framework_info. So no extra step is needed here.
-            
-            if framework_info:
-                print(f"Successfully collected and stored information for {framework_name}.")
-                # Save the collected info for potential direct use or inspection
-                cache_file = collector.cache_dir / f"{framework_name.lower().replace(' ', '_')}.json"
-                with open(cache_file, "w") as f:
-                    json.dump(framework_info, f, indent=2)
-                print(f"Cached raw info at: {cache_file}")
-
+            # Step 1: Ingest official docs into per-framework VectorStore collection
+            if hasattr(collector, "ensure_ingested"):
+                stats = collector.ensure_ingested(
+                    framework_name=framework_name,
+                    project=project,
+                    location=location,
+                    persistent_dir=str(db_path),
+                )
+                if stats.get("exists"):
+                    print(f"Vector collection already exists for {framework_name}: {stats}")
+                else:
+                    print(f"Ingested docs for {framework_name}: {stats}")
             else:
-                print(f"Could not collect information for {framework_name}.")
+                print("ensure_ingested not found on FrameworkCollector; skipping ingestion and proceeding with collection...")
+
+            # Step 2: Collect info and store to memory/cache as before
+            # Skip if raw cache already exists
+            raw_cache_file = collector.raw_cache_dir / f"{framework_name.lower().replace(' ', '_')}.json"
+            if raw_cache_file.exists():
+                print(f"Raw cache already exists for {framework_name}: {raw_cache_file}")
+                framework_info = None
+            else:
+                framework_info = await collector.collect_framework_info(
+                    framework_name=framework_name,
+                    user_id=user_id,
+                    max_pages=8,
+                    force_refresh=False
+                )
+                if framework_info:
+                    # Save to new structured raw cache directory
+                    cache_file = collector.raw_cache_dir / f"{framework_name.lower().replace(' ', '_')}.json"
+                    with open(cache_file, "w", encoding="utf-8") as f:
+                        json.dump(framework_info, f, indent=2)
+                    print(f"Cached raw info at: {cache_file}")
+                else:
+                    print(f"Warning: could not collect info for {framework_name}")
 
         except Exception as e:
             print(f"An error occurred while processing {framework_name}: {e}")
@@ -101,8 +113,11 @@ async def main():
         )
 
         profile_path = Path(PROJECT_ROOT) / "user_profiles" / "beginner_user_001.json"
+        if not profile_path.exists():
+            profile_path = Path(PROJECT_ROOT) / "user_profiles" / "default.json"
         with open(profile_path, 'r') as f:
             test_user_profile = json.load(f)
+
 
         framework_to_test = "langchain"
         generated_curriculum = generator.generate(framework_to_test, test_user_profile)
@@ -131,6 +146,6 @@ if __name__ == "__main__":
             os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(credential_path)
             print(f"Loaded credentials from {credential_path}")
         else:
-             print("Could not find local google-credentials.json.")
+            print("Could not find local google-credentials.json.")
     
     asyncio.run(main()) 

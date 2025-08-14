@@ -324,12 +324,110 @@ class CodeAssistantAgent(SpecializedAgent):
         """
         # Get base processed response
         processed = super()._process_response(response, learning_context)
-        
+
+        # Extract code blocks and detected language
+        code_blocks = self._extract_code_from_response(processed.get("content", "") or "")
+        detected_language = self._detect_language(processed.get("content", "") or "", learning_context)
+
+        # If code exists in the response, automatically write to files and remove code from reply
+        if code_blocks:
+            try:
+                written_files = self._write_code_files(code_blocks, learning_context)
+                # Strip code blocks from the content to enforce "no code in response"
+                import re
+                content_no_code = re.sub(r"```[a-zA-Z0-9_+\-]*\s*[\s\S]*?```", "", processed.get("content", ""))
+                content_no_code = content_no_code.strip()
+                # Compose a concise English-only message listing created files
+                if written_files:
+                    files_list_text = "\n".join([f"- {p}" for p in written_files])
+                    notice = (
+                        "I created the code files for you (no code shown inline):\n" + files_list_text
+                    )
+                else:
+                    notice = "Code files were generated."
+                # Keep any non-code explanation if present, then append notice
+                processed["content"] = (content_no_code + ("\n\n" if content_no_code else "") + notice).strip()
+            except Exception as e:
+                logger.error(f"Failed to write code files: {e}")
+                # As a fallback, remove code blocks from content to honor the no-code policy
+                import re
+                processed["content"] = re.sub(r"```[a-zA-Z0-9_+\-]*\s*[\s\S]*?```", "", processed.get("content", "") or "").strip()
+
         # Add code assistant-specific metadata
-        processed["code_example"] = self._extract_code_from_response(processed["content"])
-        processed["language"] = self._detect_language(processed["content"], learning_context)
-        
+        processed["code_example"] = code_blocks
+        processed["language"] = detected_language
+
         return processed
+
+    def _write_code_files(self, code_blocks: List[Dict], learning_context: Dict) -> List[str]:
+        """Write extracted code blocks to disk using the write_file tool.
+        Returns a list of created file paths.
+        """
+        # Resolve framework directory
+        framework_id = (learning_context or {}).get("framework") or (learning_context or {}).get("framework_config", {}).get("name") or "general"
+        framework_id = str(framework_id).lower()
+        base_dir = Path("generated") / framework_id
+        base_dir.mkdir(parents=True, exist_ok=True)
+
+        # Determine file extensions by language
+        def _ext_for_language(lang: str) -> str:
+            mapping = {
+                "python": "py",
+                "py": "py",
+                "javascript": "js",
+                "js": "js",
+                "typescript": "ts",
+                "ts": "ts",
+                "bash": "sh",
+                "shell": "sh",
+                "sh": "sh",
+                "markdown": "md",
+                "md": "md",
+                "json": "json",
+                "yaml": "yml",
+                "yml": "yml",
+                "html": "html",
+                "css": "css",
+                "java": "java",
+                "go": "go",
+            }
+            lang = (lang or "").strip().lower()
+            return mapping.get(lang, "txt")
+
+        # Load write_file tool
+        write_tool = None
+        try:
+            write_tool = self.tools_manager.get_tool("write_file")
+            if not write_tool:
+                # Try to register the module if not already loaded
+                self.tools_manager.register_module_tool("computer_tools")
+                write_tool = self.tools_manager.get_tool("write_file")
+        except Exception as e:
+            logger.error(f"Unable to load write_file tool: {e}")
+
+        written_paths: List[str] = []
+        import time as _time
+        for idx, block in enumerate(code_blocks, start=1):
+            lang = (block.get("language") or "").strip().lower()
+            ext = _ext_for_language(lang)
+            ts = int(_time.time())
+            filename = f"snippet_{ts}_{idx}.{ext}"
+            file_path = base_dir / filename
+            # Ensure parent directory exists
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            content = block.get("code", "")
+            try:
+                if write_tool and callable(write_tool):
+                    # Use the registered tool function
+                    write_tool(path=str(file_path), content=content)
+                else:
+                    # Fallback: write directly
+                    file_path.write_text(content, encoding="utf-8")
+                written_paths.append(str(file_path))
+            except Exception as e:
+                logger.error(f"Failed writing file {file_path}: {e}")
+
+        return written_paths
     
     def _extract_code_from_response(self, response_content: str) -> List[Dict]:
         """

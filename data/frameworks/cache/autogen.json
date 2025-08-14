@@ -1,0 +1,116 @@
+{
+  "framework_name": "autogen",
+  "collection_timestamp": "2025-08-13T15:34:11.992448",
+  "official_docs": {
+    "main_url": "https://microsoft.github.io/autogen/0.2/docs/contributor-guide/documentation/",
+    "title": "Documentation | AutoGen 0.2 - Microsoft Open Source",
+    "snippet": "",
+    "pages": [
+      {
+        "url": "https://microsoft.github.io/autogen/0.2/docs/autogen-studio/getting-started/",
+        "title": "AutoGen Studio - Getting Started",
+        "content_summary": "",
+        "is_api_reference": false
+      },
+      {
+        "url": "https://microsoft.github.io/autogen/stable//user-guide/core-user-guide/index.html",
+        "title": "Core \u2014 AutoGen - Microsoft Open Source",
+        "content_summary": "",
+        "is_api_reference": false
+      },
+      {
+        "url": "https://microsoft.github.io/autogen/dev//reference/index.html",
+        "title": "API Reference \u2014 AutoGen - Microsoft Open Source",
+        "content_summary": "",
+        "is_api_reference": true
+      },
+      {
+        "url": "https://microsoft.github.io/autogen/0.2/docs/Examples",
+        "title": "Examples | AutoGen 0.2 - Microsoft Open Source",
+        "content_summary": "",
+        "is_api_reference": false
+      },
+      {
+        "url": "https://microsoft.github.io/autogen/0.2/docs/topics/",
+        "title": "User Guide | AutoGen 0.2 - Microsoft Open Source",
+        "content_summary": "",
+        "is_api_reference": false
+      },
+      {
+        "url": "https://microsoft.github.io/autogen/stable//user-guide/agentchat-user-guide/index.html",
+        "title": "AgentChat \u2014 AutoGen - Microsoft Open Source",
+        "content_summary": "",
+        "is_api_reference": false
+      }
+    ]
+  },
+  "github_info": {},
+  "tutorials": [
+    {
+      "title": "AutoGen 0.4 Tutorial - Create a Team of AI Agents (+ Local LLM w",
+      "url": "https://www.gettingstarted.ai/autogen-multi-agent-workflow-tutorial/",
+      "snippet": "",
+      "source": "tavily_search"
+    },
+    {
+      "title": "Autogen Full Beginner Course - YouTube",
+      "url": "https://www.youtube.com/watch?v=JmjxwTEJSE8",
+      "snippet": "",
+      "source": "tavily_search"
+    },
+    {
+      "title": "Getting Started | AutoGen 0.2 - Microsoft Open Source",
+      "url": "https://microsoft.github.io/autogen/0.2/docs/Getting-Started",
+      "snippet": "",
+      "source": "tavily_search"
+    },
+    {
+      "title": "Getting Started with AutoGen - A Framework for Building Multi-Agent ...",
+      "url": "https://www.reddit.com/r/AutoGenAI/comments/1ap5y2y/getting_started_with_autogen_a_framework_for/",
+      "snippet": "",
+      "source": "tavily_search"
+    },
+    {
+      "title": "AutoGen Tutorial: Build Multi-Agent AI Applications - DataCamp",
+      "url": "https://www.datacamp.com/tutorial/autogen-tutorial",
+      "snippet": "",
+      "source": "tavily_search"
+    }
+  ],
+  "examples": [],
+  "api_reference": {
+    "API Reference \u2014 AutoGen - Microsoft Open Source": {
+      "title": "API Reference \u2014 AutoGen - Microsoft Open Source",
+      "url": "https://microsoft.github.io/autogen/dev//reference/index.html",
+      "snippet": "",
+      "source": "tavily_search"
+    }
+  },
+  "concepts": [
+    {
+      "name": "autogen",
+      "description": "The main autogen framework",
+      "source": "fallback"
+    },
+    {
+      "name": "Installation",
+      "description": "How to install autogen",
+      "source": "fallback"
+    },
+    {
+      "name": "Getting Started",
+      "description": "Basic autogen usage",
+      "source": "fallback"
+    },
+    {
+      "name": "API",
+      "description": "autogen API interface",
+      "source": "fallback"
+    },
+    {
+      "name": "Examples",
+      "description": "autogen usage examples",
+      "source": "fallback"
+    }
+  ]
+}
