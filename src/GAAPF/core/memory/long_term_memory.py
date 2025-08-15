@@ -54,16 +54,35 @@ class LongTermMemory(Memory):
         
         self.client_db = chromadb.PersistentClient(path=str(self.chroma_path))
         
-        # Set up credentials path for Vertex AI
-        import os
-        credentials_path = "d:\\Work2\\Do_an\\vinagent-main\\google-credentials.json"
-        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = credentials_path
+        # Set up credentials path for Vertex AI: prefer env, fallback to local file
+        from pathlib import Path as _Path
+        creds_env = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+        if not creds_env:
+            pr = _Path(__file__).parent.parent.parent.parent
+            local_creds = pr / "google-credentials.json"
+            if local_creds.exists():
+                os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(local_creds)
         
         # Use the LangChain VertexAIEmbeddings wrapped for ChromaDB
         try:
+            # Resolve project id
+            eff_project = project or os.getenv("GOOGLE_CLOUD_PROJECT")
+            if not eff_project:
+                try:
+                    import json as _json
+                    cp = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+                    if cp and _Path(cp).exists():
+                        data = _json.loads(_Path(cp).read_text(encoding="utf-8"))
+                        pj = data.get("project_id")
+                        if pj:
+                            eff_project = pj
+                            os.environ["GOOGLE_CLOUD_PROJECT"] = pj
+                except Exception:
+                    pass
+            eff_project = eff_project or "gen-lang-client-0305686287"
             langchain_vertex_embeddings = VertexAIEmbeddings(
                 model_name=embedding_model,
-                project=project or "gen-lang-client-0305686287",
+                project=eff_project,
                 location=location
             )
         except Exception as e:
@@ -74,7 +93,7 @@ class LongTermMemory(Memory):
             try:
                 langchain_vertex_embeddings = VertexAIEmbeddings(
                     model_name=fallback_model,
-                    project=project or "gen-lang-client-0305686287",
+                    project=eff_project,
                     location=location
                 )
                 logger.info(f"Using fallback embeddings model: {fallback_model}")

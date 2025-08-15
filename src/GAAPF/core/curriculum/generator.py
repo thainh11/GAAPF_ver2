@@ -87,15 +87,35 @@ class CurriculumGenerator:
         """
         Initializes the generator with a ChromaDB client.
         """
-        # Set up credentials path for Vertex AI
-        credentials_path = "d:\\Work2\\Do_an\\vinagent-main\\google-credentials.json"
-        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = credentials_path
+        # Set up credentials path for Vertex AI: prefer env, fallback to local file
+        from pathlib import Path as _Path
+        creds_env = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+        if not creds_env:
+            pr = _Path(__file__).parent.parent.parent.parent.parent
+            local_creds = pr / "google-credentials.json"
+            if local_creds.exists():
+                os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(local_creds)
         
         # Keep primary model as requested; add robust fallback to maintain functionality
         try:
+            # Resolve project id
+            eff_project = project or os.getenv("GOOGLE_CLOUD_PROJECT")
+            if not eff_project:
+                try:
+                    import json as _json
+                    cp = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+                    if cp and _Path(cp).exists():
+                        data = _json.loads(_Path(cp).read_text(encoding="utf-8"))
+                        pj = data.get("project_id")
+                        if pj:
+                            eff_project = pj
+                            os.environ["GOOGLE_CLOUD_PROJECT"] = pj
+                except Exception:
+                    pass
+            eff_project = eff_project or "gen-lang-client-0305686287"
             self.embedding_function = VertexAIEmbeddings(
                 model_name="gemini-embedding-001",
-                project=project or "gen-lang-client-0305686287",
+                project=eff_project,
                 location=location or "us-central1"
             )
         except Exception as e:
@@ -104,7 +124,7 @@ class CurriculumGenerator:
             try:
                 self.embedding_function = VertexAIEmbeddings(
                     model_name=fallback_model,
-                    project=project or "gen-lang-client-0305686287",
+                    project=eff_project,
                     location=location or "us-central1"
                 )
                 print(f"Using fallback embeddings model: {fallback_model}")
@@ -133,7 +153,7 @@ class CurriculumGenerator:
         self.llm = ChatVertexAI(
             model_name="gemini-2.5-flash", 
             temperature=0.3,
-            project=project or "gen-lang-client-0305686287",
+            project=eff_project,
             location=location or "us-central1"
         )
         self.prompt = ChatPromptTemplate.from_template(CURRICULUM_TEMPLATE)

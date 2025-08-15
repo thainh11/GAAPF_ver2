@@ -50,7 +50,8 @@ class SimpleLearningHub:
         self,
         llm: BaseLanguageModel,
         agents: Dict[str, Any],
-        is_logging: bool = False
+        is_logging: bool = False,
+        shared_memory_path: str = "templates/memory_session.json"
     ):
         """
         Initialize the simplified learning hub.
@@ -59,6 +60,7 @@ class SimpleLearningHub:
             llm: Language model for AI interactions
             agents: Dictionary of 3 core agents (instructor, code_assistant, practice)
             is_logging: Enable detailed logging
+            shared_memory_path: Path for shared memory across all agents
         """
         self.llm = llm
         self.agents = agents  # Only 3 agents: instructor, code_assistant, practice
@@ -66,6 +68,22 @@ class SimpleLearningHub:
         self.study_mode = False  # Study mode flag (for Phase 2)
         self.lt_memory = None  # Long-term memory per framework
         self._study_graph_compiled = None  # Compiled study graph (LangGraph)
+        
+        # Initialize shared session memory for all agents (framework-independent)
+        try:
+            from pathlib import Path
+            from ..memory.memory import Memory
+            # Ensure consistent session memory path regardless of framework
+            session_memory_path = Path("templates/memory_session.json")
+            self.shared_memory = Memory(
+                memory_path=session_memory_path,
+                is_reset_memory=False
+            )
+            if self.is_logging:
+                logger.info(f"🧠 Shared session memory initialized at {session_memory_path}")
+        except Exception as e:
+            logger.error(f"❌ Failed to initialize shared session memory: {e}")
+            self.shared_memory = None
         
         # Simple session tracking
         self.current_session = {
@@ -75,9 +93,23 @@ class SimpleLearningHub:
             "start_time": None
         }
         
+        # Update all agents to use shared memory
+        self._update_agents_memory()
+        
         if self.is_logging:
             logger.info(f"SimpleLearningHub initialized with {len(self.agents)} agents")
             logger.info(f"Available agents: {list(self.agents.keys())}")
+    
+    def _update_agents_memory(self):
+        """Update all agents to use the shared memory instance."""
+        if self.shared_memory is None:
+            return
+            
+        for agent_name, agent in self.agents.items():
+            if hasattr(agent, 'memory'):
+                agent.memory = self.shared_memory
+                if self.is_logging:
+                    logger.info(f"🔗 Updated {agent_name} to use shared memory")
         
     async def process_query(
         self,
@@ -525,22 +557,29 @@ class SimpleLearningHub:
             logger.info("Session reset")
     
     def set_framework(self, framework: str):
-        """Set the current learning framework."""
+        """Set the current learning framework and initialize framework-specific long-term memory."""
         self.current_session["framework"] = framework
         if self.is_logging:
             logger.info(f"Framework set to: {framework}")
-        # Initialize per-framework Long-Term Memory
+        # Initialize per-framework Long-Term Memory (separate from session memory)
         try:
             from pathlib import Path
             from ..memory.long_term_memory import LongTermMemory
-            lt_mem_file = Path(f"templates/memory_{framework}_lt.json")
+            # Use standardized path structure for long-term memory
+            lt_mem_file = Path(f"memory/lt_{framework}.json")
             lt_chroma_path = Path(f"memory/chroma_db/{framework}")
+            # Ensure memory directory exists
+            lt_mem_file.parent.mkdir(parents=True, exist_ok=True)
+            lt_chroma_path.parent.mkdir(parents=True, exist_ok=True)
+            
             self.lt_memory = LongTermMemory(
                 memory_path=lt_mem_file,
                 chroma_path=lt_chroma_path,
                 collection_name=f"lt_{framework}",
                 is_logging=self.is_logging,
             )
+            if self.is_logging:
+                logger.info(f"📚 Long-term memory initialized for {framework} at {lt_mem_file}")
         except Exception as e:
             if self.is_logging:
                 logger.warning(f"Failed to initialize LT memory for {framework}: {e}")

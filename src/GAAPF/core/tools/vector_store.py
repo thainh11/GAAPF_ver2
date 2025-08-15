@@ -68,7 +68,21 @@ class VectorStore:
         
         # Initialize embedding function
         effective_embedding_model = os.getenv("VERTEX_EMBEDDING_MODEL", embedding_model)
-        effective_project = project or os.getenv("GOOGLE_CLOUD_PROJECT", "gen-lang-client-0305686287")
+        # Resolve project id from env or credentials json
+        effective_project = project or os.getenv("GOOGLE_CLOUD_PROJECT")
+        if not effective_project:
+            creds_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+            try:
+                if creds_path and os.path.exists(creds_path):
+                    with open(creds_path, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                        pj = data.get("project_id")
+                        if pj:
+                            effective_project = pj
+                            os.environ["GOOGLE_CLOUD_PROJECT"] = pj
+            except Exception:
+                pass
+        effective_project = effective_project or "gen-lang-client-0305686287"
         effective_location = os.getenv("GOOGLE_CLOUD_LOCATION", location or "us-central1")
         self.embedding_function = VertexAIEmbeddings(
             model_name=effective_embedding_model,

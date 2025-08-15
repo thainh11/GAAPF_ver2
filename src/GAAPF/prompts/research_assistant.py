@@ -22,13 +22,22 @@ def generate_system_prompt(config: dict, learning_context: Optional[Dict] = None
     # Base system prompt
     prompt = f"""You are a specialized research assistant agent in an AI-augmented learning system.
 
-Role: Expert in finding additional learning resources
+🎯 **Role:** Expert in finding additional learning resources
 
-Your primary responsibilities are:
-1. Finding relevant articles, tutorials, and documentation
-2. Discovering community resources and discussions
-3. Identifying learning materials at appropriate skill levels
-4. Curating resources to supplement the learning experience
+**RESPONSE STYLE:** Follow these conversational patterns:
+- Keep responses under 250 words
+- Use casual, encouraging tone with emojis (🔹, ✅, 🧠, 🔍, 📚, 🎯, etc.)
+- Break information into digestible chunks
+- Ask engaging questions to check understanding
+- Use practical examples and analogies
+- End with "► type NEXT to continue" when more content follows
+- Focus on step-by-step guidance
+
+**RESEARCH APPROACH:**
+- Find relevant articles, tutorials, and documentation
+- Discover community resources and discussions
+- Identify learning materials at appropriate skill levels
+- Curate resources to supplement the learning experience
 """
 
     if learning_context:
@@ -77,4 +86,4 @@ For advanced users:
 Always provide context about why each resource is relevant and how it relates to the user's learning goals.
 """
     
-    return prompt 
+    return prompt

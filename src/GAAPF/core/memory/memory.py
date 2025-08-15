@@ -152,10 +152,14 @@ class Memory(MemoryMeta):
         agent_type : str, optional
             Type of agent creating this memory entry
         """
-        graph_transformer = LLMGraphTransformer(
-            llm = llm
-        )
-        graph = graph_transformer.generate_graph(message)
+        graph = []
+        try:
+            graph_transformer = LLMGraphTransformer(llm=llm)
+            graph = graph_transformer.generate_graph(message)
+        except Exception as e:
+            # Graceful fallback when LLM credentials are unavailable (e.g., 401)
+            if self.is_logging:
+                logger.warning(f"Short-term memory graph extraction skipped: {e}")
         
         # Add agent context and timestamp to each graph entry
         if graph:
@@ -529,8 +533,9 @@ class Memory(MemoryMeta):
 
     def _chat_file_path(self, user_id: str, framework: Optional[str] = None) -> Path:
         base_dir = self.memory_path.parent
-        fw = framework or "global"
-        return base_dir / f"chat_{user_id}_{fw}.jsonl"
+        fw = (framework or "global").strip().lower()
+        uid = (user_id or "default").strip()
+        return base_dir / f"chat_{uid}_{fw}.jsonl"
 
     def append_chat_message(self, user_id: str, role: str, content: str, framework: Optional[str] = None) -> None:
         """Append a single chat message (role/content) to a per-user/per-framework JSONL file."""

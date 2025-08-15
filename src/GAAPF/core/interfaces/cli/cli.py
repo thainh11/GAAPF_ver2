@@ -728,13 +728,32 @@ class GAAPFCLI:
                 time.sleep(1)  # Brief pause for visual effect
                 
                 if selected_provider["id"] == "vertex-ai":
-                    # Set up credentials path
-                    credentials_path = "d:\\Work2\\Do_an\\vinagent-main\\google-credentials.json"
-                    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = credentials_path
-                    
+                    # Prefer env GOOGLE_APPLICATION_CREDENTIALS; fallback to project root json if present
+                    from pathlib import Path as _Path
+                    creds_env = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+                    if not creds_env:
+                        pr = _Path(__file__).parent.parent.parent.parent
+                        local_creds = pr / "google-credentials.json"
+                        if local_creds.exists():
+                            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(local_creds)
+                    # Project id from env or credentials json
+                    project = os.environ.get("GOOGLE_CLOUD_PROJECT")
+                    if not project:
+                        try:
+                            import json as _json
+                            cp = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+                            if cp and _Path(cp).exists():
+                                data = _json.loads(_Path(cp).read_text(encoding="utf-8"))
+                                pj = data.get("project_id")
+                                if pj:
+                                    project = pj
+                                    os.environ["GOOGLE_CLOUD_PROJECT"] = pj
+                        except Exception:
+                            pass
+                    project = project or "gen-lang-client-0305686287"
                     llm = ChatVertexAI(
                         model_name="gemini-2.5-flash", 
-                        project=os.environ.get("GOOGLE_CLOUD_PROJECT", "gen-lang-client-0305686287"),
+                        project=project,
                         location="us-central1",
                         temperature=0.7,
                     )
@@ -798,11 +817,29 @@ class GAAPFCLI:
             
             try:
                 if provider == "vertex-ai":
-                    # Set up credentials path
-                    credentials_path = "d:\\Work2\\Do_an\\vinagent-main\\google-credentials.json"
-                    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = credentials_path
-                    
-                    project = os.environ.get("GOOGLE_CLOUD_PROJECT", "gen-lang-client-0305686287")
+                    # Prefer env GOOGLE_APPLICATION_CREDENTIALS; fallback to project root json if present
+                    from pathlib import Path as _Path
+                    creds_env = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+                    if not creds_env:
+                        pr = _Path(__file__).parent.parent.parent.parent
+                        local_creds = pr / "google-credentials.json"
+                        if local_creds.exists():
+                            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(local_creds)
+                    # Project id from env or credentials json
+                    project = os.environ.get("GOOGLE_CLOUD_PROJECT")
+                    if not project:
+                        try:
+                            import json as _json
+                            cp = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+                            if cp and _Path(cp).exists():
+                                data = _json.loads(_Path(cp).read_text(encoding="utf-8"))
+                                pj = data.get("project_id")
+                                if pj:
+                                    project = pj
+                                    os.environ["GOOGLE_CLOUD_PROJECT"] = pj
+                        except Exception:
+                            pass
+                    project = project or "gen-lang-client-0305686287"
                     
                     try:
                         log_message = f"[success]✓ Using Google Vertex AI (Project: {project})[/success]"

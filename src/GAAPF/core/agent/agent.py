@@ -70,6 +70,7 @@ class Agent(AgentMeta):
         state_schema: type[Any] = None,
         config_schema: type[Any] = None,
         memory_path: Path = None,
+        memory_instance: Optional[Any] = None,
         is_reset_memory = False,
         use_long_term_memory: bool = False,
         chroma_path: Optional[Union[Path, str]] = Path('memory/chroma_db'),
@@ -152,7 +153,12 @@ class Agent(AgentMeta):
         self.is_reset_memory = is_reset_memory
         self.memory = None
         
-        if memory_path:
+        # Priority: use shared memory instance if provided, otherwise create new memory
+        if memory_instance is not None:
+            self.memory = memory_instance
+            if self.is_logging:
+                logger.info("🧠 Using shared memory instance")
+        elif memory_path:
             try:
                 if use_long_term_memory:
                     from ..memory import LongTermMemory
@@ -365,6 +371,13 @@ class Agent(AgentMeta):
         if self.is_logging:
             logger.info(f"🔄 Synchronous invoke called for user: {user_id}")
             
+        # Ensure in-sync user id preference before async path
+        try:
+            if user_id and user_id != "unknown_user":
+                self._user_id = user_id
+        except Exception:
+            pass
+
         try:
             # Use run_sync helper to handle event loop compatibility
             return run_sync(self.ainvoke(query, is_save_memory, user_id, learning_context, **kwargs))

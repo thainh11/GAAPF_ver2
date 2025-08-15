@@ -5,6 +5,7 @@ This script provides an easy way to run the GAAPF CLI from the project root.
 """
 
 import os
+import json
 import sys
 import asyncio
 from pathlib import Path
@@ -31,13 +32,26 @@ def main():
             credentials_path = project_root / "google-credentials.json"
             if credentials_path.exists():
                 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(credentials_path)
-            project_id = os.getenv("GOOGLE_CLOUD_PROJECT", "gen-lang-client-0305686287")
+            # Derive project id: env first, then credentials json
+            project_id = os.getenv("GOOGLE_CLOUD_PROJECT")
+            if not project_id and credentials_path.exists():
+                try:
+                    with open(credentials_path, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                        cred_project = data.get("project_id")
+                        if cred_project:
+                            project_id = cred_project
+                            os.environ["GOOGLE_CLOUD_PROJECT"] = project_id
+                except Exception:
+                    pass
+            # Final fallback (only for development)
+            project_id = project_id or "gen-lang-client-0305686287"
             llm_instance = ChatVertexAI(
                 model_name="gemini-2.5-flash",
                 temperature=0.3,
                 project=project_id,
                 location="us-central1"
-            )
+            )            
             print("🤖 Using Google Vertex AI LLM...")
         except Exception as e:
             print(f"⚠️  Vertex AI initialization failed: {e}")
