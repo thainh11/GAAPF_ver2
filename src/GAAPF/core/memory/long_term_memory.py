@@ -54,63 +54,14 @@ class LongTermMemory(Memory):
         
         self.client_db = chromadb.PersistentClient(path=str(self.chroma_path))
         
-        # Set up credentials path for Vertex AI: prefer env, fallback to local file
-        from pathlib import Path as _Path
-        creds_env = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
-        if not creds_env:
-            pr = _Path(__file__).parent.parent.parent.parent
-            local_creds = pr / "google-credentials.json"
-            if local_creds.exists():
-                os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(local_creds)
+        from ..utils.credentials_helper import setup_google_credentials, get_vertex_embedding_config
         
-        # Use the LangChain VertexAIEmbeddings wrapped for ChromaDB
-        try:
-            # Resolve project id
-            eff_project = project or os.getenv("GOOGLE_CLOUD_PROJECT")
-            if not eff_project:
-                try:
-                    import json as _json
-                    cp = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
-                    if cp and _Path(cp).exists():
-                        data = _json.loads(_Path(cp).read_text(encoding="utf-8"))
-                        pj = data.get("project_id")
-                        if pj:
-                            eff_project = pj
-                            os.environ["GOOGLE_CLOUD_PROJECT"] = pj
-                except Exception:
-                    pass
-            eff_project = eff_project or "gen-lang-client-0305686287"
-            langchain_vertex_embeddings = VertexAIEmbeddings(
-                model_name=embedding_model,
-                project=eff_project,
-                location=location
-            )
-        except Exception as e:
-            logger.warning(
-                f"Failed to initialize LT memory for {embedding_model}: {e}"
-            )
-            fallback_model = os.getenv("GAAPF_FALLBACK_EMBED_MODEL", "text-embedding-004")
-            try:
-                langchain_vertex_embeddings = VertexAIEmbeddings(
-                    model_name=fallback_model,
-                    project=eff_project,
-                    location=location
-                )
-                logger.info(f"Using fallback embeddings model: {fallback_model}")
-            except Exception as e2:
-                logger.error(
-                    f"Failed to initialize fallback embeddings model {fallback_model}: {e2}. "
-                    "Using trivial embedding as last resort."
-                )
-                # Minimal trivial embedder to avoid system crash
-                class _TrivialEmbedder:  # noqa: N801 - internal helper
-                    def embed_documents(self, docs: List[str]) -> List[List[float]]:
-                        return [[float(len(d))] * 8 for d in docs]
-
-                    def embed_query(self, q: str) -> List[float]:
-                        return [float(len(q))] * 8
-
-                langchain_vertex_embeddings = _TrivialEmbedder()
+        # Setup Google credentials
+        setup_google_credentials()
+        
+        # Get embedding configuration
+        embedding_config = get_vertex_embedding_config()
+        langchain_vertex_embeddings = VertexAIEmbeddings(**embedding_config)
         self.embedding_function = VertexAIEmbeddingFunction(langchain_vertex_embeddings)
 
         # Persist collection name for later maintenance operations

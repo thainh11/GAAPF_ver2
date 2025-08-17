@@ -27,19 +27,30 @@ def run_bash_script(script_path: str, *args) -> str:
 
 def run_bash_command(command: str) -> str:
     """
-    Executes a Bash command and returns the output.
+    Executes a shell command and returns the output.
+    Uses PowerShell on Windows, bash on Unix-like systems.
 
     Args:
-        command (str): The Bash command to execute.
+        command (str): The shell command to execute.
 
     Returns:
         str: The standard output of the executed command.
     """
+    import platform
+    
     try:
-        # Execute the command
-        result = subprocess.run(
-            command, shell=True, text=True, capture_output=True, check=True
-        )
+        # Use appropriate shell based on platform
+        if platform.system() == "Windows":
+            # Use PowerShell on Windows
+            result = subprocess.run(
+                ["powershell", "-Command", command], 
+                text=True, capture_output=True, check=True
+            )
+        else:
+            # Use bash on Unix-like systems
+            result = subprocess.run(
+                command, shell=True, text=True, capture_output=True, check=True
+            )
 
         return result.stdout  # Return the standard output
     except subprocess.CalledProcessError as e:

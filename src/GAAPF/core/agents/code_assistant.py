@@ -6,6 +6,8 @@ from . import SpecializedAgent
 from langchain_core.language_models.base import BaseLanguageModel
 from langchain_core.tools import BaseTool
 from ...prompts.code_assistant import generate_system_prompt
+from ..utils.retriever import Retriever
+from ..tools.vector_store import VectorStore
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -98,11 +100,41 @@ class CodeAssistantAgent(SpecializedAgent):
         self.auto_execution_enabled = config.get("auto_execution", False)
         self.framework_integration_enabled = True
         
+        # Initialize Retriever for RAG capabilities
+        self.retriever = None
+        self.current_framework = None
+        
         if self.is_logging:
             logger.info(f"Initialized CodeAssistantAgent with config: {self.config}")
             logger.info(f"Enhanced capabilities: validation={self.code_validation_enabled}, "
                        f"auto_execution={self.auto_execution_enabled}, "
                        f"framework_integration={self.framework_integration_enabled}")
+    
+    def execute_code_safely(self, code: str, language: str = "python") -> Dict:
+        """Public method to safely execute code snippets.
+        
+        Parameters:
+        ----------
+        code : str
+            Code to execute
+        language : str, optional
+            Programming language (python, bash, sh)
+            
+        Returns:
+        -------
+        Dict
+            Execution result with success status, output, and errors
+        """
+        import asyncio
+        
+        # Run the async method in sync context
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+        return loop.run_until_complete(self._safe_execute_code(code, language))
     
     async def execute_code_with_validation(self, code: str, language: str, framework_context: Dict = None) -> Dict:
         """
@@ -222,30 +254,74 @@ class CodeAssistantAgent(SpecializedAgent):
             return {"warnings": [], "suggestions": []}
     
     async def _safe_execute_code(self, code: str, language: str) -> Dict:
-        """Safely execute code with proper error handling."""
+        """Safely execute code with proper error handling using available tools."""
         try:
-            # Use computer tools for safe execution
-            execution_tool = None
-            for tool in self.tools:
-                if hasattr(tool, 'name') and 'execute_code' in tool.name:
-                    execution_tool = tool
-                    break
+            # Get the appropriate execution tool from tools manager
+            bash_command_tool = self.tools_manager.get_tool("run_bash_command")
             
-            if execution_tool:
-                result = await execution_tool.arun(
-                    code=code,
-                    language=language,
-                    timeout=30  # 30 second timeout
-                )
+            if not bash_command_tool:
                 return {
-                    "success": True,
-                    "output": result.get("output", ""),
-                    "errors": result.get("errors", [])
+                    "success": False,
+                    "error": "Execution tools not available"
                 }
+            
+            # Handle different languages
+            if language.lower() in ['python', 'py']:
+                # For Python code, create a temporary file and execute it
+                import tempfile
+                import os
+                
+                with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+                    f.write(code)
+                    temp_file = f.name
+                
+                try:
+                    # Execute Python file
+                    result = bash_command_tool(f"python {temp_file}")
+                    return {
+                        "success": True,
+                        "output": result,
+                        "errors": []
+                    }
+                finally:
+                    # Clean up temporary file
+                    if os.path.exists(temp_file):
+                        os.unlink(temp_file)
+                        
+            elif language.lower() in ['bash', 'sh', 'shell', 'powershell', 'ps1', 'cmd']:
+                 # For shell commands, execute directly
+                 # On Windows, adapt bash commands to PowerShell equivalents
+                 import platform
+                 if platform.system() == "Windows":
+                     # Convert common bash commands to PowerShell
+                     if code.strip().startswith('ls'):
+                         # Handle ls with pipes
+                         if '|' in code and 'head' in code:
+                             # Convert "ls | head -n" to "Get-ChildItem | Select-Object -First n"
+                             import re
+                             match = re.search(r'head\s+-?(\d+)', code)
+                             if match:
+                                 num = match.group(1)
+                                 code = f"Get-ChildItem | Select-Object -First {num}"
+                             else:
+                                 code = "Get-ChildItem | Select-Object -First 10"
+                         else:
+                             code = code.replace('ls', 'Get-ChildItem', 1)
+                     elif code.strip().startswith('pwd'):
+                         code = code.replace('pwd', 'Get-Location', 1)
+                     elif code.strip().startswith('cat'):
+                         code = code.replace('cat', 'Get-Content', 1)
+                 
+                 result = bash_command_tool(code)
+                 return {
+                     "success": True,
+                     "output": result,
+                     "errors": []
+                 }
             else:
                 return {
                     "success": False,
-                    "error": "Code execution tool not available"
+                    "error": f"Language '{language}' not supported for execution"
                 }
                 
         except Exception as e:
@@ -291,20 +367,182 @@ class CodeAssistantAgent(SpecializedAgent):
     
     def _generate_system_prompt(self, learning_context: Dict) -> str:
         """
-        Generate a system prompt for this agent.
+        Generate a system prompt for this agent with relevant documentation context.
         
+        Parameters:
+        ----------
+        learning_context : Dict
+            Current learning context
+            
         Returns:
         -------
         str
-            System prompt for the agent
+            System prompt for the agent with injected documentation context
         """
-        return generate_system_prompt(self.config, learning_context)
+        # Get base system prompt
+        base_prompt = generate_system_prompt(self.config, learning_context)
+        
+        # Try to inject relevant documentation context
+        try:
+            framework_name = learning_context.get("framework_config", {}).get("name", "").lower()
+            
+            if framework_name and self._initialize_retriever_for_framework(framework_name):
+                # Get some general documentation for the framework
+                general_query = f"introduction overview getting started {framework_name}"
+                relevant_docs = self.retriever.retrieve_docs(general_query, k=2) if self.retriever else []
+                
+                if relevant_docs:
+                    # Format documentation context
+                    context_parts = []
+                    for i, doc in enumerate(relevant_docs, 1):
+                        # Extract text content from document dict
+                        doc_text = doc.get('text', str(doc)) if isinstance(doc, dict) else str(doc)
+                        # Get metadata for source attribution
+                        metadata = doc.get('metadata', {}) if isinstance(doc, dict) else {}
+                        source = metadata.get('source', f'Doc {i}')
+                        
+                        # Truncate long documents to fit in prompt
+                        doc_content = doc_text[:400] + "..." if len(doc_text) > 400 else doc_text
+                        context_parts.append(f"**Source: {source}**\n{doc_content}")
+                    
+                    context_text = "\n\n".join(context_parts)
+                    
+                    # Inject context into system prompt
+                    enhanced_prompt = f"""{base_prompt}
+
+**📚 FRAMEWORK DOCUMENTATION CONTEXT:**
+The following documentation snippets are available for reference when providing {framework_name} guidance:
+
+{context_text}
+
+**IMPORTANT:** When relevant, reference these documentation sources in your responses to provide accurate, up-to-date information. Always cite sources when using specific information from the documentation.
+"""
+                    
+                    if self.is_logging:
+                        logger.info(f"Enhanced system prompt with {len(relevant_docs)} documentation snippets for {framework_name}")
+                    
+                    return enhanced_prompt
+            
+        except Exception as e:
+            if self.is_logging:
+                logger.error(f"Error injecting documentation context into system prompt: {str(e)}")
+        
+        # Return base prompt if context injection fails
+        return base_prompt
+    
+    def _initialize_retriever_for_framework(self, framework_name: str) -> bool:
+        """
+        Initialize Retriever for a specific framework.
+        
+        Parameters:
+        ----------
+        framework_name : str
+            Name of the framework (e.g., 'langchain', 'langgraph')
+            
+        Returns:
+        -------
+        bool
+            True if successfully initialized, False otherwise
+        """
+        try:
+            if framework_name != self.current_framework:
+                # Create VectorStore path for the framework
+                vs_path = f"data/frameworks/vectordb/{framework_name}/{framework_name}"
+                collection_name = f"framework_docs_{framework_name}"
+                
+                # Initialize VectorStore with consistent embedding model
+                vector_store = VectorStore(
+                    persistent_dir=vs_path, 
+                    collection_name=collection_name,
+                    embedding_model="gemini-embedding-001"
+                )
+                
+                # Check if VectorStore has data
+                if vector_store.count() > 0:
+                    self.retriever = Retriever(vector_store)
+                    self.current_framework = framework_name
+                    if self.is_logging:
+                        logger.info(f"Initialized Retriever for framework: {framework_name}")
+                    return True
+                else:
+                    if self.is_logging:
+                        logger.warning(f"VectorStore for {framework_name} is empty")
+                    return False
+            return True
+            
+        except Exception as e:
+            if self.is_logging:
+                logger.error(f"Failed to initialize Retriever for {framework_name}: {str(e)}")
+            return False
     
     def _enhance_query_with_context(self, query: str, learning_context: Dict) -> str:
         """
-        Enhance a user query with learning context specific to the code assistant role.
+        Enhance a user query with specific relevant documentation for the query.
+        
+        Parameters:
+        ----------
+        query : str
+            Original user query
+        learning_context : Dict
+            Current learning context
+            
+        Returns:
+        -------
+        str
+            Enhanced query with query-specific documentation context
         """
-        return query
+        try:
+            # Get current framework from learning context
+            framework_name = learning_context.get("framework_config", {}).get("name", "").lower()
+            
+            if not framework_name:
+                return query
+            
+            # Initialize retriever for current framework
+            if not self._initialize_retriever_for_framework(framework_name):
+                return query
+            
+            # Retrieve documents specifically relevant to this query
+            if self.retriever:
+                relevant_docs = self.retriever.retrieve_docs(query, k=3)
+                
+                if relevant_docs:
+                    # Format retrieved context with source attribution
+                    context_parts = []
+                    for i, doc in enumerate(relevant_docs, 1):
+                        # Extract text content from document dict
+                        doc_text = doc.get('text', str(doc)) if isinstance(doc, dict) else str(doc)
+                        # Get metadata for source attribution
+                        metadata = doc.get('metadata', {}) if isinstance(doc, dict) else {}
+                        source = metadata.get('source', f'Reference {i}')
+                        
+                        # Truncate long documents
+                        doc_content = doc_text[:350] + "..." if len(doc_text) > 350 else doc_text
+                        context_parts.append(f"**[{source}]**\n{doc_content}")
+                    
+                    context_text = "\n\n".join(context_parts)
+                    
+                    # Enhance query with specific context
+                    enhanced_query = f"""{query}
+
+**📋 QUERY-SPECIFIC DOCUMENTATION:**
+The following documentation is specifically relevant to your question:
+
+{context_text}
+
+**Please reference these sources when providing your response and cite them appropriately.**"""
+                    
+                    if self.is_logging:
+                        logger.info(f"Enhanced query with {len(relevant_docs)} query-specific documents")
+                    
+                    return enhanced_query
+            
+            return query
+            
+        except Exception as e:
+            if self.is_logging:
+                logger.error(f"Error enhancing query with context: {str(e)}")
+            return query
     
     def _process_response(self, response: Any, learning_context: Dict) -> Dict:
         """

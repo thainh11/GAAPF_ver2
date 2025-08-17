@@ -55,40 +55,18 @@ class VectorStore:
             project: GCP project ID
             location: GCP location
         """
-        # Set up credentials path for Vertex AI (prefer env, fallback to local file)
-        if not os.getenv("GOOGLE_APPLICATION_CREDENTIALS"):
-            project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
-            fallback_creds = os.path.join(project_root, "google-credentials.json")
-            if os.path.exists(fallback_creds):
-                os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = fallback_creds
+        from ..utils.credentials_helper import setup_google_credentials, get_vertex_embedding_config
+        
+        # Setup Google credentials
+        setup_google_credentials()
         
         # Ensure directory exists
         self.persistent_dir = Path(persistent_dir) if isinstance(persistent_dir, str) else persistent_dir
         self.persistent_dir.parent.mkdir(parents=True, exist_ok=True)
         
-        # Initialize embedding function
-        effective_embedding_model = os.getenv("VERTEX_EMBEDDING_MODEL", embedding_model)
-        # Resolve project id from env or credentials json
-        effective_project = project or os.getenv("GOOGLE_CLOUD_PROJECT")
-        if not effective_project:
-            creds_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-            try:
-                if creds_path and os.path.exists(creds_path):
-                    with open(creds_path, "r", encoding="utf-8") as f:
-                        data = json.load(f)
-                        pj = data.get("project_id")
-                        if pj:
-                            effective_project = pj
-                            os.environ["GOOGLE_CLOUD_PROJECT"] = pj
-            except Exception:
-                pass
-        effective_project = effective_project or "gen-lang-client-0305686287"
-        effective_location = os.getenv("GOOGLE_CLOUD_LOCATION", location or "us-central1")
-        self.embedding_function = VertexAIEmbeddings(
-            model_name=effective_embedding_model,
-            project=effective_project,
-            location=effective_location
-        )
+        # Get embedding configuration
+        embedding_config = get_vertex_embedding_config()
+        self.embedding_function = VertexAIEmbeddings(**embedding_config)
         
         # Disable Chroma telemetry noise
         os.environ.setdefault("ANONYMIZED_TELEMETRY", "false")
@@ -107,13 +85,52 @@ class VectorStore:
         Get or create ChromaDB collection.
         """
         try:
-            self.collection = self.client.get_collection(name=self.collection_name)
+            # Check if collection exists
+            existing_collection = self.client.get_collection(name=self.collection_name)
+            
+            # Always check dimension compatibility, even for empty collections
+            # Test current embedding function dimension
+            test_vector = self.embedding_function.embed_query("test")
+            current_dim = len(test_vector)
+            
+            # Check metadata first for dimension info
+            metadata = existing_collection.metadata or {}
+            stored_dim = metadata.get('embedding_dimension')
+            
+            # If metadata has correct dimension, use the collection
+            if stored_dim == current_dim:
+                logger.info(f"Collection has correct dimension in metadata: {stored_dim}")
+            else:
+                # Check if collection has any embeddings to verify dimension
+                result = existing_collection.peek(limit=1)
+                if result['embeddings'] is not None and len(result['embeddings']) > 0:
+                    existing_dim = len(result['embeddings'][0])
+                    if existing_dim != current_dim:
+                        logger.info(f"Dimension mismatch: existing={existing_dim}, current={current_dim}. Recreating collection.")
+                        self.client.delete_collection(name=self.collection_name)
+                        raise Exception("Dimension mismatch - recreating collection")
+                else:
+                    # For empty collections without correct metadata, recreate
+                    if stored_dim and stored_dim != current_dim:
+                        logger.info(f"Dimension mismatch in metadata: stored={stored_dim}, current={current_dim}. Recreating collection.")
+                        self.client.delete_collection(name=self.collection_name)
+                        raise Exception("Dimension mismatch - recreating collection")
+            
+            self.collection = existing_collection
             logger.info(f"Using existing collection: {self.collection_name}")
         except Exception as e:
             logger.info(f"Creating new collection: {self.collection_name}")
+            # Test current embedding function dimension for metadata
+            test_vector = self.embedding_function.embed_query("test")
+            current_dim = len(test_vector)
+            
             self.collection = self.client.create_collection(
                 name=self.collection_name,
-                metadata={"description": f"Framework documentation for {self.collection_name}"}
+                metadata={
+                    "description": f"Framework documentation for {self.collection_name}",
+                    "embedding_dimension": current_dim,
+                    "embedding_model": getattr(self.embedding_function, 'model_name', 'unknown')
+                }
             )
         
         # Create LangChain Chroma wrapper for semantic search
@@ -163,19 +180,34 @@ class VectorStore:
         Returns:
             List of document dictionaries with 'text', 'metadata', and 'score' keys
         """
-        # Use LangChain's similarity_search for better API
-        results = self.langchain_vectorstore.similarity_search_with_score(query, k=k)
-        
-        # Format results
-        formatted_results = []
-        for doc, score in results:
-            formatted_results.append({
-                'text': doc.page_content,
-                'metadata': doc.metadata,
-                'score': score
-            })
-        
-        return formatted_results
+        try:
+            # Use direct ChromaDB query to avoid LangChain dimension issues
+            query_embedding = self.embedding_function.embed_query(query)
+            
+            results = self.collection.query(
+                query_embeddings=[query_embedding],
+                n_results=k,
+                include=['documents', 'metadatas', 'distances']
+            )
+            
+            # Format results
+            formatted_results = []
+            if results['documents'] and results['documents'][0]:
+                for i, doc in enumerate(results['documents'][0]):
+                    metadata = results['metadatas'][0][i] if results['metadatas'] and results['metadatas'][0] else {}
+                    distance = results['distances'][0][i] if results['distances'] and results['distances'][0] else 0.0
+                    
+                    formatted_results.append({
+                        'text': doc,
+                        'metadata': metadata,
+                        'score': 1.0 - distance  # Convert distance to similarity score
+                    })
+            
+            return formatted_results
+            
+        except Exception as e:
+            logger.error(f"Error in similarity search: {e}")
+            return []
     
     def delete(self, ids: List[str]) -> bool:
         """

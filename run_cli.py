@@ -5,7 +5,6 @@ This script provides an easy way to run the GAAPF CLI from the project root.
 """
 
 import os
-import json
 import sys
 import asyncio
 from pathlib import Path
@@ -28,29 +27,22 @@ def main():
         # Initialize LLM (prefer Google Vertex AI)
         try:
             from langchain_google_vertexai import ChatVertexAI
-            # Ensure Google credentials are set
-            credentials_path = project_root / "google-credentials.json"
-            if credentials_path.exists():
-                os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(credentials_path)
-            # Derive project id: env first, then credentials json
-            project_id = os.getenv("GOOGLE_CLOUD_PROJECT")
-            if not project_id and credentials_path.exists():
-                try:
-                    with open(credentials_path, "r", encoding="utf-8") as f:
-                        data = json.load(f)
-                        cred_project = data.get("project_id")
-                        if cred_project:
-                            project_id = cred_project
-                            os.environ["GOOGLE_CLOUD_PROJECT"] = project_id
-                except Exception:
-                    pass
-            # Final fallback (only for development)
-            project_id = project_id or "gen-lang-client-0305686287"
+            from GAAPF.core.utils.credentials_helper import get_vertex_ai_config
+            
+            # Get standardized Vertex AI configuration
+            vertex_config = get_vertex_ai_config()
+            project_id = vertex_config["project"]
+            model_name = vertex_config["model_name"]
+            temperature = vertex_config["temperature"]
+            location = vertex_config["location"]
+            top_p = vertex_config["top_p"]
+            
             llm_instance = ChatVertexAI(
-                model_name="gemini-2.5-flash",
-                temperature=0.3,
+                model_name=model_name,
+                temperature=temperature,
+                top_p=top_p,
                 project=project_id,
-                location="us-central1"
+                location=location
             )            
             print("🤖 Using Google Vertex AI LLM...")
         except Exception as e:

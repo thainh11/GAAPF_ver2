@@ -75,7 +75,7 @@ class Agent(AgentMeta):
         use_long_term_memory: bool = False,
         chroma_path: Optional[Union[Path, str]] = Path('memory/chroma_db'),
         collection_name: str = "long_term_memory",
-        embedding_model: str = "text-embedding-004",
+        embedding_model: str = "gemini-embedding-001",
         api_key: Optional[str] = None,
         mcp_client: DistributedMCPClient = None,
         mcp_server_name: str = None,

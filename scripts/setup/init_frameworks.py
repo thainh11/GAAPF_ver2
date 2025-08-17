@@ -18,16 +18,20 @@ try:
 except Exception:
     pass
 from src.GAAPF.core.memory.long_term_memory import LongTermMemory
-from src.GAAPF.core.curriculum.generator import CurriculumGenerator
+from src.GAAPF.core.utils.credentials_helper import setup_google_credentials, get_vertex_ai_config
 
 
 async def main():
     """
     Initializes the framework knowledge base and then runs a test generation using Vertex AI.
     """
-    # Define your Google Cloud project details here
-    project = "gen-lang-client-0305686287"  # <-- IMPORTANT: Replace with your Google Cloud Project ID
-    location = "us-central1"     # <-- IMPORTANT: Replace with your project's region if different
+    # Setup Google credentials
+    setup_google_credentials()
+    
+    # Get Vertex AI configuration
+    vertex_config = get_vertex_ai_config()
+    project = vertex_config['project']
+    location = vertex_config['location']
     collection_name = "framework_knowledge"
 
     # Define the list of frameworks to be initialized
@@ -102,50 +106,10 @@ async def main():
     print("\n\n--- Framework Initialization Complete ---")
     print("--- Starting Test Curriculum Generation using Vertex AI ---")
 
-    try:
-        # Use the same client that LongTermMemory created
-        db_client = memory.client_db 
-        generator = CurriculumGenerator(
-            db_client=db_client,
-            collection_name=collection_name,
-            project=project,
-            location=location
-        )
-
-        profile_path = Path(PROJECT_ROOT) / "user_profiles" / "beginner_user_001.json"
-        if not profile_path.exists():
-            profile_path = Path(PROJECT_ROOT) / "user_profiles" / "default.json"
-        with open(profile_path, 'r') as f:
-            test_user_profile = json.load(f)
-
-
-        framework_to_test = "langchain"
-        generated_curriculum = generator.generate(framework_to_test, test_user_profile)
-
-        if "error" not in generated_curriculum:
-            output_dir = Path(PROJECT_ROOT) / "data" / "curriculums"
-            output_dir.mkdir(exist_ok=True)
-            output_path = output_dir / f"dynamic_curriculum_{framework_to_test}.json"
-            with open(output_path, 'w') as f:
-                json.dump(generated_curriculum, f, indent=2)
-            print(f"\nSuccessfully generated and saved test curriculum to {output_path}")
-        else:
-            print("\nFailed to generate test curriculum.")
-            print(generated_curriculum.get("raw_output", ""))
-
-    except Exception as e:
-        print(f"An error occurred during test curriculum generation: {e}")
+    print("\n=== Framework VectorStore Setup Complete ===")
+    print(f"Successfully initialized VectorStore for {len(framework_names)} frameworks")
+    print("VectorStore is ready for RAG operations")
 
 
 if __name__ == "__main__":
-    if "GOOGLE_APPLICATION_CREDENTIALS" not in os.environ:
-        print("Warning: GOOGLE_APPLICATION_CREDENTIALS not set. The script will try to use default credentials.")
-        # Attempt to set credentials from a local file as a fallback
-        credential_path = Path(__file__).parent.parent / "google-credentials.json"
-        if credential_path.exists():
-            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(credential_path)
-            print(f"Loaded credentials from {credential_path}")
-        else:
-            print("Could not find local google-credentials.json.")
-    
-    asyncio.run(main()) 
+    asyncio.run(main())

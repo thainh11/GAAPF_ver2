@@ -309,7 +309,7 @@ class ToolManager:
                     import_path = import_path[4:]
                 if not import_path:
                     # Fallback: try known tools namespace
-                    import_path = f"GAAPF.core.tools.{tool_name}"
+                    import_path = f"src.GAAPF.core.tools.{tool_name}"
                 module = importlib.import_module(import_path)
                 if not hasattr(module, tool_name) and 'tool_name' in arguments:
                     # No-op; but we expect function by tool_name

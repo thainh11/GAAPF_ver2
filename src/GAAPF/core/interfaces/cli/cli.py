@@ -728,34 +728,14 @@ class GAAPFCLI:
                 time.sleep(1)  # Brief pause for visual effect
                 
                 if selected_provider["id"] == "vertex-ai":
-                    # Prefer env GOOGLE_APPLICATION_CREDENTIALS; fallback to project root json if present
-                    from pathlib import Path as _Path
-                    creds_env = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
-                    if not creds_env:
-                        pr = _Path(__file__).parent.parent.parent.parent
-                        local_creds = pr / "google-credentials.json"
-                        if local_creds.exists():
-                            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(local_creds)
-                    # Project id from env or credentials json
-                    project = os.environ.get("GOOGLE_CLOUD_PROJECT")
-                    if not project:
-                        try:
-                            import json as _json
-                            cp = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
-                            if cp and _Path(cp).exists():
-                                data = _json.loads(_Path(cp).read_text(encoding="utf-8"))
-                                pj = data.get("project_id")
-                                if pj:
-                                    project = pj
-                                    os.environ["GOOGLE_CLOUD_PROJECT"] = pj
-                        except Exception:
-                            pass
-                    project = project or "gen-lang-client-0305686287"
+                    from ...utils.credentials_helper import get_vertex_ai_config
+                    vertex_config = get_vertex_ai_config()
                     llm = ChatVertexAI(
-                        model_name="gemini-2.5-flash", 
-                        project=project,
-                        location="us-central1",
-                        temperature=0.7,
+                        model_name=vertex_config["model_name"],
+                        project=vertex_config["project"],
+                        location=vertex_config["location"],
+                        temperature=vertex_config["temperature"],
+                        top_p=vertex_config["top_p"]
                     )
                 elif selected_provider["id"] == "google-genai":
                     api_key = os.environ.get(selected_provider["env_var"])
@@ -817,41 +797,18 @@ class GAAPFCLI:
             
             try:
                 if provider == "vertex-ai":
-                    # Prefer env GOOGLE_APPLICATION_CREDENTIALS; fallback to project root json if present
-                    from pathlib import Path as _Path
-                    creds_env = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
-                    if not creds_env:
-                        pr = _Path(__file__).parent.parent.parent.parent
-                        local_creds = pr / "google-credentials.json"
-                        if local_creds.exists():
-                            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(local_creds)
-                    # Project id from env or credentials json
-                    project = os.environ.get("GOOGLE_CLOUD_PROJECT")
-                    if not project:
-                        try:
-                            import json as _json
-                            cp = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
-                            if cp and _Path(cp).exists():
-                                data = _json.loads(_Path(cp).read_text(encoding="utf-8"))
-                                pj = data.get("project_id")
-                                if pj:
-                                    project = pj
-                                    os.environ["GOOGLE_CLOUD_PROJECT"] = pj
-                        except Exception:
-                            pass
-                    project = project or "gen-lang-client-0305686287"
+                    # Credentials and project handling is now done in credentials_helper
                     
                     try:
-                        log_message = f"[success]✓ Using Google Vertex AI (Project: {project})[/success]"
+                        from GAAPF.core.utils.credentials_helper import get_vertex_ai_config
+                        
+                        vertex_config = get_vertex_ai_config()
+                        
+                        log_message = f"[success]✓ Using Google Vertex AI (Project: {vertex_config['project']})[/success]"
                         if self.is_logging:
                             self.console.print(log_message + " with application credentials.")
                         
-                        return ChatVertexAI(
-                            model_name="gemini-2.5-flash",
-                            temperature=0.7,
-                            project=project,
-                            location="us-central1"
-                        )
+                        return ChatVertexAI(**vertex_config)
                     except Exception as e:
                         if self.is_logging:
                             self.console.print(f"[error]Failed to initialize Vertex AI: {e}[/error]")

@@ -1,15 +1,3 @@
-"""
-Simplified CLI - Essential user interface for GAAPF
-Replaces the 3757-line complex CLI with streamlined experience (85% reduction).
-
-This module provides essential CLI functionality:
-1. Basic conversation loop
-2. Study mode toggle (ready for Phase 2)
-3. Framework selection
-4. Simple commands
-5. Clean, modern interface
-"""
-
 import asyncio
 import os
 import sys

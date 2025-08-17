@@ -8,8 +8,9 @@ import sys
 from pathlib import Path
 import chromadb
 
-# Add the parent directory to the path so we can import the GAAPF package
-sys.path.append(str(Path(__file__).parent / "GAAPF-main"))
+# Add the project root to the path so we can import the GAAPF package
+project_root = Path(__file__).parent.parent.parent
+sys.path.append(str(project_root))
 
 # Now, we can import the necessary modules
 from src.GAAPF.core.memory.long_term_memory import LongTermMemory
@@ -105,4 +106,4 @@ if __name__ == "__main__":
         collection_name = sys.argv[2]
         print_collection(chroma_path, collection_name)
     else:
-        print_all_collections(chroma_path) 
+        print_all_collections(chroma_path)

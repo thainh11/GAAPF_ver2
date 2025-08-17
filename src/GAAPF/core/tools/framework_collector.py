@@ -588,31 +588,39 @@ class FrameworkCollector:
             for tutorial in info.get("tutorials", [])[:5]:
                 snippet = (tutorial.get("snippet") or "").strip()
                 url = tutorial.get("url", "")
-                if not snippet:
-                    continue
-                documents.append({
-                    "text": snippet,
-                    "metadata": {
-                        "framework": framework_id,
-                        "url": url,
-                        "title": tutorial.get("title", "Tutorial"),
-                        "source": "tutorial"
-                    }
-                })
+                title = tutorial.get("title", "Tutorial")
+                
+                # Use title and URL as fallback content if snippet is empty
+                content = snippet if snippet else f"Tutorial: {title}. URL: {url}"
+                if content and url:
+                    documents.append({
+                        "text": content,
+                        "metadata": {
+                            "framework": framework_id,
+                            "url": url,
+                            "title": title,
+                            "source": "tutorial"
+                        }
+                    })
+                    
             for api_name, api in list(info.get("api_reference", {}).items())[:5]:
                 snippet = (api.get("snippet") or "").strip()
                 url = api.get("url", "")
-                if not snippet:
-                    continue
-                documents.append({
-                    "text": snippet,
-                    "metadata": {
-                        "framework": framework_id,
-                        "url": url,
-                        "title": api.get("title", api_name),
-                        "source": "api_reference"
-                    }
-                })
+                title = api.get("title", api_name)
+                
+                # Use title and URL as fallback content if snippet is empty
+                content = snippet if snippet else f"API Reference: {title}. URL: {url}"
+                if content and url:
+                    documents.append({
+                        "text": content,
+                        "metadata": {
+                            "framework": framework_id,
+                            "url": url,
+                            "title": title,
+                            "source": "api_reference"
+                        }
+                    })
+                    
             if not documents:
                 return {"framework": framework_id, "collection": collection_name, "added": 0}
 
