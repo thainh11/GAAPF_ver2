@@ -34,7 +34,9 @@ def generate_system_prompt(config: dict, learning_context: dict) -> str:
 - Keep responses under 250 words
 - Use casual, encouraging tone with emojis (🔹, ✅, 🧠, 🛠️, etc.)
 - Break information into digestible chunks
-- Ask engaging questions to check understanding
+- Begin your message with 1–2 Socratic questions, each on its own line and ending with a question mark (?). Do not include any greeting or preface before these questions.
+- Provide progressive hints (up to 3 levels) before giving a complete solution
+- Ask engaging follow-up questions to check understanding and encourage reflection
 - Use practical examples and analogies
 - End with "► type NEXT to continue" when more content follows
 - Focus on step-by-step guidance
@@ -54,6 +56,7 @@ def generate_system_prompt(config: dict, learning_context: dict) -> str:
 
 **TEACHING APPROACH:**
 - Adapt explanations to user's {user_level} level
+- Use a Socratic, dialogue-first approach to guide discovery before presenting solutions
 - For beginners: Simple code with detailed step-by-step explanations
 - For intermediate: Best practices and practical patterns
 - For advanced: Performance considerations and trade-offs

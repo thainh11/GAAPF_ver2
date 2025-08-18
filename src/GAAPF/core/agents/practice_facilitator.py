@@ -1,5 +1,4 @@
 import logging
-import time
 from typing import Dict, List, Optional, Union, Any
 from pathlib import Path
 
@@ -141,7 +140,7 @@ class PracticeFacilitatorAgent(SpecializedAgent):
         if self.is_logging:
             logger.info(f"Initialized PracticeFacilitatorAgent with config: {self.config}")
     
-    def _generate_system_prompt(self) -> str:
+    def _generate_system_prompt(self, learning_context: Dict = None) -> str:
         """
         Generate a system prompt for this agent.
         
@@ -174,10 +173,19 @@ class PracticeFacilitatorAgent(SpecializedAgent):
         # Extract additional relevant context for practice activities
         framework_config = learning_context.get("framework_config", {})
         current_module = learning_context.get("current_module", "")
+        # Fallback to hub-managed learning_state when current_module is not set
+        if not current_module:
+            current_module = (
+                (learning_context.get("session", {}) or {}).get("learning_state", {}) or {}
+            ).get("current_module", "") or current_module
         user_profile = learning_context.get("user_profile", {})
         
         # Get completed exercises and skill level
-        completed_exercises = user_profile.get("completed_exercises", [])
+        # Prefer hub-tracked counter; fallback to user_profile list length if present
+        _ls = ((learning_context.get("session", {}) or {}).get("learning_state", {}) or {})
+        completed_exercises_count = int(_ls.get("completed_exercises", 0))
+        if completed_exercises_count == 0:
+            completed_exercises_count = len(user_profile.get("completed_exercises", []))
         skill_level = user_profile.get("skill_level", {}).get(current_module, "beginner")
         
         # Get module details if available
@@ -236,7 +244,7 @@ class PracticeFacilitatorAgent(SpecializedAgent):
         practice_context = f"""
 Additional context for practice activities:
 - Module skill level: {skill_level}
-- Completed exercises: {len(completed_exercises)}
+- Completed exercises: {completed_exercises_count}
 - Recommended exercise types: {exercises_str}{adaptive_context}
 
 As a practice facilitator, create adaptive exercises based on the user's knowledge state and learning preferences.
@@ -271,6 +279,14 @@ Focus on skills that need practice and adjust difficulty according to their curr
         processed["exercise_type"] = self._determine_exercise_type(processed["content"])
         processed["difficulty_level"] = self._determine_difficulty_level(processed["content"], learning_context)
         processed["has_solution"] = "solution" in processed["content"].lower()
+        # Lightweight signals for hub state updates (Phase 5)
+        try:
+            signals = dict(processed.get("signals") or {})
+            signals["exercise_issued"] = True
+            signals["exercise_type"] = processed["exercise_type"]
+            processed["signals"] = signals
+        except Exception:
+            pass
         
         return processed
     

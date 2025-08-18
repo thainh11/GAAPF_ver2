@@ -92,6 +92,16 @@ class SimpleLearningHub:
             "interaction_count": 0,
             "start_time": None
         }
+        # Initialize learning state container (persisted via shared session memory)
+        self.current_session.setdefault("learning_state", {
+            "framework": "langchain",
+            "current_module": None,
+            "onboarding_stage": None,
+            "completed_modules": [],
+            "concept_mastery": {},  # {concept: prob}
+            "completed_exercises": 0,
+            "last_updated": None,
+        })
         
         # Update all agents to use shared memory
         self._update_agents_memory()
@@ -168,6 +178,17 @@ class SimpleLearningHub:
             "session": self.current_session,
             "framework": context.get("framework", self.current_session["framework"]),
         }
+        # Load persisted learning state and merge
+        try:
+            loaded_state = self._load_learning_state(user_id)
+            if isinstance(loaded_state, dict):
+                self.current_session["learning_state"].update({k: v for k, v in loaded_state.items() if v is not None})
+            # Ensure current_module propagated into context when available
+            cm = self.current_session.get("learning_state", {}).get("current_module")
+            if cm and not enhanced_context.get("current_module"):
+                enhanced_context["current_module"] = cm
+        except Exception:
+            pass
         # Inject framework config and curriculum if available
         try:
             fw = enhanced_context.get("framework", "langchain").lower()
@@ -280,8 +301,17 @@ class SimpleLearningHub:
                 # Ensure selected_agent is set for logging and session tracking
                 selected_agent = response_dict["agent_used"]
             else:
-                # Non-study path: simple routing logic based on keywords
-                selected_agent = self._route_to_agent(query)
+                # Non-study path: prefer LLM routing with JSON; fallback to heuristic
+                try:
+                    route = self._llm_route(query, enhanced_context)
+                    agent_prop = (route or {}).get("agent")
+                    conf = float((route or {}).get("confidence") or 0)
+                    if agent_prop in {"instructor", "code_assistant", "practice"} and conf >= 0.55:
+                        selected_agent = agent_prop
+                    else:
+                        selected_agent = self._route_to_agent(query)
+                except Exception:
+                    selected_agent = self._route_to_agent(query)
                 if self.is_logging:
                     logger.info(f"Query: '{query[:50]}...' routed to {selected_agent}")
 
@@ -309,6 +339,19 @@ class SimpleLearningHub:
                     "study_mode": False,
                     "interaction_count": self.current_session["interaction_count"],
                 })
+
+                # Update learning state and persist
+                try:
+                    self._update_and_persist_learning_state(
+                        user_id=user_id,
+                        context=enhanced_context,
+                        agent_used=selected_agent,
+                        response_dict=response_dict,
+                        original_query=query,
+                    )
+                except Exception as _e:
+                    if self.is_logging:
+                        logger.warning(f"Learning state update failed: {_e}")
 
             # Track last exchange for quick recall in UI
             try:
@@ -523,6 +566,175 @@ class SimpleLearningHub:
         # Default to instructor for explanations, concepts, etc.
         else:
             return "instructor"
+
+    def _load_learning_state(self, user_id: str) -> Dict[str, Any]:
+        """Load learning state from shared memory graph entries.
+        We store a single entry with relation='state' and tail as JSON string.
+        """
+        try:
+            if not getattr(self, "shared_memory", None):
+                return {}
+            entries = self.shared_memory.load_memory(load_type='list', user_id=user_id) or []
+            # Find the newest state entry
+            latest = None
+            for e in entries:
+                if e.get('relation') == 'state':
+                    if (latest is None) or (e.get('timestamp', 0) > latest.get('timestamp', 0)):
+                        latest = e
+            if latest and latest.get('tail'):
+                import json as _json
+                return _json.loads(latest['tail'])
+        except Exception:
+            pass
+        return {}
+
+    def _save_learning_state(self, user_id: str, state: Dict[str, Any]) -> None:
+        """Persist learning state as a single graph entry with relation='state'."""
+        try:
+            if not getattr(self, "shared_memory", None):
+                return
+            import json as _json, time as _time
+            payload = {
+                'head': user_id,
+                'relation': 'state',
+                'tail': _json.dumps(state, ensure_ascii=False),
+                'agent_type': 'hub',
+                'timestamp': _time.time(),
+            }
+            # Save as update (will append and then overwrite when saving entire list)
+            entries = self.shared_memory.load_memory(load_type='list', user_id=user_id) or []
+            # Remove older state entries
+            entries = [e for e in entries if e.get('relation') != 'state']
+            entries.append(payload)
+            self.shared_memory.save_memory(entries, self.shared_memory.memory_path, user_id)
+        except Exception:
+            pass
+
+    def _summarize_modules(self, modules_map: Dict[str, Any], limit: int = 5) -> str:
+        try:
+            lines = []
+            for i, (k, v) in enumerate(modules_map.items()):
+                if i >= limit:
+                    break
+                title = (v.get('title') or k).strip()
+                concepts = ", ".join((v.get('concepts') or [])[:3])
+                desc = (v.get('description') or '').strip()
+                line = f"- {k}: {title} | Concepts: {concepts} | {desc}"
+                lines.append(line)
+            return "\n".join(lines)
+        except Exception:
+            return ""
+
+    def _llm_route(self, query: str, context: Dict[str, Any]) -> Dict[str, Any]:
+        """Use the main LLM to classify and route the query to an agent. JSON-only contract."""
+        try:
+            hint = (
+                "Hints (non-binding): code/debug/error → code_assistant; practice/exercise/quiz → practice; otherwise instructor."
+            )
+            prompt = (
+                "Route the user's request to exactly one agent from this set: [\"instructor\", \"code_assistant\", \"practice\"].\n"
+                "Return ONLY JSON with fields: {\"agent\": \"...\", \"confidence\": 0..1, \"reason\": \"...\"}.\n"
+                f"Context framework: {context.get('framework','')} | study_mode: {bool(context.get('study_mode'))}\n"
+                f"{hint}\n"
+                f"User: {query}"
+            )
+            resp = self.llm.invoke(prompt)
+            import json as _json
+            body = getattr(resp, 'content', str(resp))
+            return _json.loads((body or '').strip())
+        except Exception:
+            return {}
+
+    def _llm_next_module(self, modules_map: Dict[str, Any], learning_state: Dict[str, Any], last_turn: Dict[str, Any]) -> Dict[str, Any]:
+        """Ask LLM to propose next module key (or keep same). JSON-only."""
+        try:
+            summary = self._summarize_modules(modules_map, limit=5)
+            cm = learning_state.get('current_module')
+            completed = learning_state.get('completed_modules', [])
+            prompt = (
+                "Given the curriculum modules below and the current learning state, propose the next module key to study.\n"
+                "Return ONLY JSON: {\"next_module\": \"<key or same>\", \"confidence\": 0..1, \"reason\": \"...\"}.\n"
+                f"Modules (key: title | Concepts | desc):\n{summary}\n\n"
+                f"Current module: {cm} | Completed: {completed}\n"
+                f"Last answer preview: {(last_turn.get('content','') or '')[:280]}\n"
+            )
+            resp = self.llm.invoke(prompt)
+            import json as _json
+            body = getattr(resp, 'content', str(resp))
+            return _json.loads((body or '').strip())
+        except Exception:
+            return {}
+
+    def _llm_estimate_mastery(self, concepts: Any, last_turn: Dict[str, Any], prior: Dict[str, float]) -> Dict[str, float]:
+        """Estimate per-concept mastery probabilities using LLM; blend with prior via EMA."""
+        try:
+            if not concepts:
+                return prior or {}
+            concepts = list(dict.fromkeys(concepts))[:6]
+            prompt = (
+                "Estimate mastery (0..1) per concept based on the last assistant response.\n"
+                "Return ONLY JSON: {\"concept_probs\": {\"<concept>\": float}}.\n"
+                f"Concepts: {concepts}\n"
+                f"Last answer: {(last_turn.get('content','') or '')[:450]}\n"
+            )
+            resp = self.llm.invoke(prompt)
+            import json as _json
+            body = getattr(resp, 'content', str(resp))
+            data = _json.loads((body or '').strip())
+            probs = (data or {}).get('concept_probs') or {}
+            # Blend with prior via EMA
+            out = dict(prior or {})
+            for c in concepts:
+                p = float(probs.get(c, out.get(c, 0.0)) or 0.0)
+                prev = float(out.get(c, 0.0) or 0.0)
+                out[c] = round(0.7 * p + 0.3 * prev, 3)
+            return out
+        except Exception:
+            return prior or {}
+
+    def _update_and_persist_learning_state(self, user_id: str, context: Dict[str, Any], agent_used: str, response_dict: Dict[str, Any], original_query: str) -> None:
+        """Update mastery, module progression and persist learning state in shared memory."""
+        try:
+            state = dict(self.current_session.get('learning_state') or {})
+            fw = (context.get('framework') or self.current_session.get('framework') or 'langchain').lower()
+            state['framework'] = fw
+            # Completed exercises hint
+            if agent_used == 'practice':
+                state['completed_exercises'] = int(state.get('completed_exercises') or 0) + 1
+            # Mastery update using module concepts
+            modules_map = ((context.get('framework_config') or {}).get('modules') or {})
+            current_module = state.get('current_module') or context.get('current_module')
+            if current_module and current_module in modules_map:
+                concepts = (modules_map.get(current_module) or {}).get('concepts') or []
+            else:
+                concepts = []
+            state['concept_mastery'] = self._llm_estimate_mastery(
+                concepts=concepts,
+                last_turn=response_dict,
+                prior=state.get('concept_mastery') or {}
+            )
+            # Decide next module on NEXT or when confidence is high
+            advance = isinstance(original_query, str) and (original_query.strip().lower() in {"next", "> next", "► next"} or " next" in original_query.strip().lower())
+            if modules_map and (advance or True):
+                proposal = self._llm_next_module(modules_map, state, response_dict)
+                nm = (proposal or {}).get('next_module')
+                conf = float((proposal or {}).get('confidence') or 0)
+                if nm and isinstance(nm, str) and conf >= 0.6:
+                    if nm != state.get('current_module'):
+                        prev = state.get('current_module')
+                        if prev:
+                            done = set(state.get('completed_modules') or [])
+                            done.add(prev)
+                            state['completed_modules'] = list(done)
+                        state['current_module'] = nm
+            # Timestamp
+            import time as _time
+            state['last_updated'] = int(_time.time())
+            # Persist
+            self.current_session['learning_state'] = state
+            self._save_learning_state(user_id=user_id, state=state)
+        except Exception:
+            pass
     
     def enable_study_mode(self):
         """

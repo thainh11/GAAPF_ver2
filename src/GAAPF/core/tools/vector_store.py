@@ -87,35 +87,34 @@ class VectorStore:
         try:
             # Check if collection exists
             existing_collection = self.client.get_collection(name=self.collection_name)
-            
-            # Always check dimension compatibility, even for empty collections
-            # Test current embedding function dimension
+
+            # Determine current embedding dimension
             test_vector = self.embedding_function.embed_query("test")
             current_dim = len(test_vector)
-            
-            # Check metadata first for dimension info
+
+            # Verify stored metadata AND actual stored embeddings dimension
             metadata = existing_collection.metadata or {}
             stored_dim = metadata.get('embedding_dimension')
-            
-            # If metadata has correct dimension, use the collection
-            if stored_dim == current_dim:
-                logger.info(f"Collection has correct dimension in metadata: {stored_dim}")
-            else:
-                # Check if collection has any embeddings to verify dimension
+
+            # Always peek a sample to verify real dimension, even if metadata matches
+            try:
                 result = existing_collection.peek(limit=1)
-                if result['embeddings'] is not None and len(result['embeddings']) > 0:
+            except Exception:
+                result = {"embeddings": None}
+
+            existing_dim = None
+            try:
+                if result and result.get('embeddings') and len(result['embeddings']) > 0:
                     existing_dim = len(result['embeddings'][0])
-                    if existing_dim != current_dim:
-                        logger.info(f"Dimension mismatch: existing={existing_dim}, current={current_dim}. Recreating collection.")
-                        self.client.delete_collection(name=self.collection_name)
-                        raise Exception("Dimension mismatch - recreating collection")
-                else:
-                    # For empty collections without correct metadata, recreate
-                    if stored_dim and stored_dim != current_dim:
-                        logger.info(f"Dimension mismatch in metadata: stored={stored_dim}, current={current_dim}. Recreating collection.")
-                        self.client.delete_collection(name=self.collection_name)
-                        raise Exception("Dimension mismatch - recreating collection")
-            
+            except Exception:
+                existing_dim = None
+
+            if existing_dim is not None and existing_dim != current_dim:
+                logger.info(f"Dimension mismatch detected via peek: existing={existing_dim}, current={current_dim}. Recreating collection.")
+                self.client.delete_collection(name=self.collection_name)
+                raise Exception("Dimension mismatch - recreating collection")
+
+            # If we got here, metadata/peek are acceptable; attach collection
             self.collection = existing_collection
             logger.info(f"Using existing collection: {self.collection_name}")
         except Exception as e:
@@ -159,12 +158,28 @@ class VectorStore:
             from uuid import uuid4
             ids = [str(uuid4()) for _ in range(len(documents))]
         
-        # Add documents to the collection
-        self.collection.add(
-            documents=texts,
-            metadatas=metadatas,
-            ids=ids
-        )
+        # Compute embeddings with the configured Vertex AI embedding function
+        try:
+            embeddings = self.embedding_function.embed_documents(texts)
+        except Exception as e:
+            logger.error(f"Failed to embed documents: {e}")
+            embeddings = None
+
+        # Add documents to the collection (include precomputed embeddings when available)
+        if embeddings is not None:
+            self.collection.add(
+                documents=texts,
+                metadatas=metadatas,
+                ids=ids,
+                embeddings=embeddings,
+            )
+        else:
+            # Fallback: add without embeddings
+            self.collection.add(
+                documents=texts,
+                metadatas=metadatas,
+                ids=ids
+            )
         
         logger.info(f"Added {len(documents)} documents to collection {self.collection_name}")
         return ids

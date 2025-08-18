@@ -180,6 +180,24 @@ class InstructorAgent(SpecializedAgent):
         ]
 
         response_message = self.llm.invoke(messages)
+
+        # Enforce question-first style as a last-mile guardrail (no hardcoded content)
+        try:
+            content = getattr(response_message, "content", str(response_message)) or ""
+            first_line = (content.strip().splitlines() or [""])[0]
+            # If first line is not a question, ask the LLM to reframe the opening lines into questions
+            if not first_line.strip().endswith("?"):
+                ref_prompt = (
+                    "Rewrite the following response so that it begins with 1-2 Socratic questions "
+                    "(each on its own line, ending with '?') with no greeting or preface before the questions. "
+                    "Keep total length under 250 words. Preserve the original guidance and facts.\n\n"
+                    f"Original response:\n{content}"
+                )
+                reframed = self.llm.invoke(ref_prompt)
+                new_content = getattr(reframed, "content", str(reframed)) or content
+                response_message.content = new_content
+        except Exception:
+            pass
         
         if self.is_logging:
             logger.info("✅ InstructorAgent response generated successfully")

@@ -99,6 +99,8 @@ class CodeAssistantAgent(SpecializedAgent):
         self.code_validation_enabled = True
         self.auto_execution_enabled = config.get("auto_execution", False)
         self.framework_integration_enabled = True
+        # Phase 3.3: Validation mode (light checks, no execution)
+        self.validation_mode = bool(config.get("validation_mode", False))
         
         # Initialize Retriever for RAG capabilities
         self.retriever = None
@@ -169,9 +171,29 @@ class CodeAssistantAgent(SpecializedAgent):
                     "suggestions": validation_result.get("suggestions", [])
                 }
             
+            # Phase 3.3: If validation mode is enabled, perform light run checks only
+            if self.validation_mode:
+                light_check = await self._light_run_check(code, language)
+                return {
+                    "success": bool(light_check.get("ok", False)),
+                    "validation": validation_result,
+                    "light_check": light_check,
+                    "message": "Light validation only (no execution)",
+                }
+
             # Execute the code if validation passes
             if self.auto_execution_enabled:
                 execution_result = await self._safe_execute_code(code, language)
+                # Phase 3.2: If execution failed, diagnose and propose fixes
+                if not execution_result.get("success", False):
+                    error_text = "\n".join(execution_result.get("errors", [])) if execution_result.get("errors") else str(execution_result)
+                    advice = await self._diagnose_error_and_suggest_fix(code, error_text, language, framework_context or {})
+                    return {
+                        "success": False,
+                        "validation": validation_result,
+                        "execution": execution_result,
+                        "suggestions": advice.get("suggestions")
+                    }
                 return {
                     "success": True,
                     "validation": validation_result,
@@ -278,6 +300,13 @@ class CodeAssistantAgent(SpecializedAgent):
                 try:
                     # Execute Python file
                     result = bash_command_tool(f"python {temp_file}")
+                    # Phase 3.2: Detect error output pattern from tool and convert to structured error
+                    if isinstance(result, str) and result.strip().lower().startswith("error:"):
+                        return {
+                            "success": False,
+                            "output": "",
+                            "errors": [result]
+                        }
                     return {
                         "success": True,
                         "output": result,
@@ -313,6 +342,13 @@ class CodeAssistantAgent(SpecializedAgent):
                          code = code.replace('cat', 'Get-Content', 1)
                  
                  result = bash_command_tool(code)
+                 # Phase 3.2: Detect error output pattern from tool and convert to structured error
+                 if isinstance(result, str) and result.strip().lower().startswith("error:"):
+                     return {
+                         "success": False,
+                         "output": "",
+                         "errors": [result]
+                     }
                  return {
                      "success": True,
                      "output": result,
@@ -544,6 +580,68 @@ The following documentation is specifically relevant to your question:
                 logger.error(f"Error enhancing query with context: {str(e)}")
             return query
     
+    async def _light_run_check(self, code: str, language: str) -> Dict:
+        """Phase 3.3: Perform a lightweight run validation without executing business logic.
+        For Python, attempt bytecode compilation using py_compile.
+        """
+        try:
+            lang = (language or "").lower()
+            if lang in ["python", "py"]:
+                import tempfile
+                import os
+                bash_command_tool = None
+                try:
+                    bash_command_tool = self.tools_manager.get_tool("run_bash_command")
+                except Exception:
+                    bash_command_tool = None
+                if not bash_command_tool:
+                    return {"ok": False, "reason": "Execution tools not available"}
+                with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+                    f.write(code)
+                    temp_file = f.name
+                try:
+                    result = bash_command_tool(f"python -m py_compile {temp_file}")
+                    if isinstance(result, str) and result.strip().lower().startswith("error:"):
+                        return {"ok": False, "reason": result}
+                    return {"ok": True}
+                finally:
+                    try:
+                        if os.path.exists(temp_file):
+                            os.unlink(temp_file)
+                    except Exception:
+                        pass
+            # For other languages: no-op light check
+            return {"ok": True}
+        except Exception as e:
+            if self.is_logging:
+                logger.error(f"Light run check failed: {e}")
+            return {"ok": False, "reason": str(e)}
+
+    async def _diagnose_error_and_suggest_fix(self, code: str, error_text: str, language: str, learning_context: Dict) -> Dict:
+        """Phase 3.2: Use the LLM to analyze runtime error and propose concise fix suggestions."""
+        try:
+            prompt = (
+                "You are a code troubleshooting assistant. Analyze the runtime error and suggest a minimal fix.\n"
+                f"Language: {language}\n\n"
+                "Error details:\n"
+                f"{error_text}\n\n"
+                "Code snippet:\n"
+                f"{code}\n\n"
+                "Respond with a short bullet list of concrete steps to fix the issue."
+            )
+            # Use async LLM call if available
+            if hasattr(self.llm, "ainvoke"):
+                resp = await self.llm.ainvoke(prompt)
+                content = getattr(resp, "content", str(resp))
+            else:
+                resp = self.llm.invoke(prompt)
+                content = getattr(resp, "content", str(resp))
+            return {"suggestions": content.strip() if isinstance(content, str) else str(content)}
+        except Exception as e:
+            if self.is_logging:
+                logger.error(f"Error diagnosis failed: {e}")
+            return {"suggestions": "Unable to generate suggestions due to an internal error."}
+
     def _process_response(self, response: Any, learning_context: Dict) -> Dict:
         """
         Process and structure the code assistant's response.
@@ -594,6 +692,17 @@ The following documentation is specifically relevant to your question:
         # Add code assistant-specific metadata
         processed["code_example"] = code_blocks
         processed["language"] = detected_language
+        # Lightweight signals for hub state updates (Phase 5)
+        try:
+            signals = dict(processed.get("signals") or {})
+            # If there is any validation/execution information attached upstream, surface success signal
+            # (We avoid running execution here; just propagate known flags.)
+            exec_info = processed.get("execution") or {}
+            if isinstance(exec_info, dict) and exec_info.get("success") is True:
+                signals["code_success"] = True
+            processed["signals"] = signals
+        except Exception:
+            pass
 
         return processed
 
