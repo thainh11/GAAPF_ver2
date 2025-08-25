@@ -2,6 +2,7 @@
 import asyncio
 import json
 from pathlib import Path
+from datetime import datetime
 import os
 import sys
 import shutil
@@ -34,6 +35,15 @@ async def main():
     location = vertex_config['location']
     collection_name = "framework_knowledge"
 
+    # Force deep crawl and disable intro-only behavior regardless of environment
+    os.environ.setdefault("ONLY_INTRO_MODE", "false")
+    os.environ.setdefault("ONLY_TUTORIALS_MODE", "false")
+    os.environ.setdefault("TAVILY_MAP_LIMIT_DOCS", "400")
+    os.environ.setdefault("TAVILY_MAX_DOC_URLS", "200")
+    os.environ.setdefault("TAVILY_CONCURRENCY", "8")
+    os.environ.setdefault("TAVILY_EXTRACT_BATCH", "5")
+    os.environ.setdefault("HTTP_FALLBACK_CAP", "100")
+
     # Build dynamic list of frameworks to initialize
     # Priority order: env → collector.allowed_domains → cached files → fallback defaults
     frameworks_env = os.getenv("GAAPF_FRAMEWORKS", "").strip()
@@ -56,12 +66,29 @@ async def main():
         pass
 
     # Fallback default list
-    fallback_list = {"langchain", "langgraph", "crewai", "autogen", "haystack"}
+    fallback_list = {"langchain", "langgraph", "crewai", "agno"}
 
     framework_names = sorted((from_env_or_allowed | cached_frameworks | fallback_list))
 
+    # Filter strictly by frameworks present in config/intro_urls.json
+    intro_cfg_path = Path(__file__).parent.parent.parent / "config" / "intro_urls.json"
+    intro_map = {}
+    allowed_intro = set()
+    try:
+        with open(intro_cfg_path, "r", encoding="utf-8") as _f:
+            intro_map = json.load(_f) or {}
+            allowed_intro = {k.strip().lower() for k, v in intro_map.items() if v}
+    except Exception as _e:
+        print(f"Warning: failed to load intro_urls.json: {_e}")
+        allowed_intro = set()
+
+    if allowed_intro:
+        framework_names = [fw for fw in framework_names if fw in allowed_intro]
+    else:
+        framework_names = []
+
     if not framework_names:
-        print("No frameworks discovered from environment, collector, or cache.")
+        print("No frameworks discovered that are present in intro_urls.json.")
         return
 
     print(f"Frameworks to initialize (final): {', '.join(framework_names)}")
@@ -92,22 +119,84 @@ async def main():
     for framework_name in framework_names:
         print(f"--- Initializing knowledge for: {framework_name} ---")
         try:
-            # Step 1: Ingest official docs into per-framework VectorStore collection
-            if hasattr(collector, "ensure_ingested"):
-                stats = collector.ensure_ingested(
-                    framework_name=framework_name,
-                    project=project,
-                    location=location,
-                    persistent_dir=str(db_path),
-                )
-                if stats.get("exists"):
-                    print(f"Vector collection already exists for {framework_name}: {stats}")
-                else:
-                    print(f"Ingested docs for {framework_name}: {stats}")
-            else:
-                print("ensure_ingested not found on FrameworkCollector; skipping ingestion and proceeding with collection...")
+            # Step 1: Deep crawl strictly from configured base URL, then index
+            base_url = (intro_map.get(framework_name, "") or "").strip()
+            if not base_url:
+                print(f"No base URL for {framework_name} in intro_urls.json; skipping.")
+                continue
 
-            # Step 2: Collect info and store to memory/cache as before
+            # Discovery via Tavily Map + sitemap (strictly same domain as base_url)
+            try:
+                map_limit = int(os.getenv("TAVILY_MAP_LIMIT_DOCS", "400"))
+            except Exception:
+                map_limit = 400
+            discovered_urls = []
+            try:
+                discovered = await collector._discover_with_tavily_map(
+                    base_url=base_url.rstrip("/"),
+                    max_depth=3,
+                    max_breadth=60,
+                    limit=map_limit,
+                )
+            except Exception:
+                discovered = [base_url.rstrip("/")]
+            try:
+                sitemap_urls = collector._discover_sitemap_urls(base_url, cap=map_limit)
+            except Exception:
+                sitemap_urls = []
+            discovered_urls = list(dict.fromkeys((discovered or []) + (sitemap_urls or [])))
+
+            # Prioritize and cap, then extract content (advanced), fallback HTTP
+            try:
+                max_docs = int(os.getenv("TAVILY_MAX_DOC_URLS", "200"))
+            except Exception:
+                max_docs = 200
+            prioritized = collector._prioritize_docs_urls(base_url.rstrip("/"), discovered_urls, max_docs)
+            try:
+                concurrency = int(os.getenv("TAVILY_CONCURRENCY", "8"))
+            except Exception:
+                concurrency = 8
+            extracted = await collector._extract_urls(prioritized, max_concurrent=concurrency)
+
+            pages_map = {}
+            for e in extracted or []:
+                u = e.get("url") or ""
+                if not u:
+                    continue
+                pages_map[u] = {
+                    "url": u,
+                    "title": e.get("title", "") or u,
+                    "content": e.get("content", "") or "",
+                }
+            # HTTP fallback for missing/empty
+            try:
+                http_cap = int(os.getenv("HTTP_FALLBACK_CAP", "100"))
+            except Exception:
+                http_cap = 100
+            to_fill = [u for u in prioritized if (u not in pages_map) or (not pages_map[u]["content"])]
+            if to_fill:
+                http_results = collector._http_extract_batch(to_fill[:http_cap])
+                for item in http_results:
+                    u = item.get("url") or ""
+                    if not u:
+                        continue
+                    pages_map[u] = {"url": u, "title": item.get("title", u), "content": item.get("content", "")}
+
+            pages = []
+            for u, v in pages_map.items():
+                content = v.get("content", "") or ""
+                if not content:
+                    continue
+                title = v.get("title", "") or u
+                pages.append({
+                    "url": u,
+                    "title": title,
+                    "content_summary": content[:800] + ("..." if len(content) > 800 else ""),
+                    "is_api_reference": any(t in u.lower() for t in ["api", "reference", "class", "method", "function"]),
+                    "content": content,
+                })
+
+            # Step 2: Write/refresh raw cache using our strict-base crawl
             # If raw cache exists and force_refresh is False, reuse it; otherwise refresh
             raw_cache_file = collector.raw_cache_dir / f"{framework_name.lower().replace(' ', '_')}.json"
             info_data = None
@@ -119,21 +208,44 @@ async def main():
                 except Exception as _e:
                     print(f"Warning: failed reading cache for {framework_name}: {_e}")
             else:
-                framework_info = await collector.collect_framework_info(
+                # Coverage report
+                try:
+                    coverage = collector._coverage_report(discovered_urls, pages)
+                except Exception:
+                    coverage = {"discovered_urls": len(discovered_urls), "extracted_urls": len(pages), "coverage": 0.0}
+                framework_info = {
+                    "framework_name": framework_name,
+                    "collection_timestamp": datetime.now().isoformat(),
+                    "official_docs": {
+                        "main_url": base_url,
+                        "title": (pages[0].get("title") if pages else ""),
+                        "pages": pages,
+                        "coverage": coverage,
+                    },
+                    "github_info": {},
+                    "tutorials": [],
+                    "examples": [],
+                    "api_reference": {},
+                    "concepts": [],
+                }
+                cache_file = collector.raw_cache_dir / f"{framework_name.lower().replace(' ', '_')}.json"
+                with open(cache_file, "w", encoding="utf-8") as f:
+                    json.dump(framework_info, f, indent=2)
+                print(f"Cached raw info at: {cache_file}")
+                info_data = framework_info
+
+            # Step 2.1: Ingest into per-framework VectorStore using official method (includes code blocks)
+            try:
+                ingest_stats = collector.ingest_official_docs(
                     framework_name=framework_name,
-                    user_id=user_id,
-                    max_pages=max_pages,
-                    force_refresh=force_refresh
+                    project=project,
+                    location=location,
+                    persistent_dir=str(db_path),
+                    force_refresh=False  # reuse our cache
                 )
-                if framework_info:
-                    # Save to new structured raw cache directory
-                    cache_file = collector.raw_cache_dir / f"{framework_name.lower().replace(' ', '_')}.json"
-                    with open(cache_file, "w", encoding="utf-8") as f:
-                        json.dump(framework_info, f, indent=2)
-                    print(f"Cached raw info at: {cache_file}")
-                    info_data = framework_info
-                else:
-                    print(f"Warning: could not collect info for {framework_name}")
+                print(f"Ingested docs for {framework_name}: {ingest_stats}")
+            except Exception as _e:
+                print(f"Warning: ingest_official_docs failed for {framework_name}: {_e}")
 
             # Step 3: Generate lightweight curriculum JSON from collected info
             try:
@@ -196,6 +308,92 @@ async def main():
                 print(f"Generated curriculum: {cur_path}")
             except Exception as _e:
                 print(f"Warning: failed to write curriculum for {framework_name}: {_e}")
+
+            # Step 2.9: Emit Tavily-style JSON outputs (basic and with_code)
+            try:
+                ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                out_dir = Path("results")
+                out_dir.mkdir(parents=True, exist_ok=True)
+                framework_id = framework_name.lower().replace(" ", "_")
+
+                base_url = ((info_data or {}).get("official_docs", {}) or {}).get("main_url", "")
+                # Use discovered URLs from our earlier step when available; otherwise derive from pages
+                discovered_urls = []
+                try:
+                    # Reconstruct discovered from cache if present
+                    if info_data and info_data.get("official_docs", {}).get("coverage", {}).get("discovered_urls"):
+                        # We don't store the actual list, so rebuild a reasonable set from pages
+                        discovered_urls = list({p.get("url") for p in (info_data.get("official_docs", {}).get("pages", []) or []) if p.get("url")})
+                    else:
+                        discovered_urls = list({p.get("url") for p in (info_data.get("official_docs", {}).get("pages", []) or []) if p.get("url")})
+                except Exception:
+                    discovered_urls = []
+
+                pages_payload = []
+                for p in ((info_data or {}).get("official_docs", {}).get("pages", []) or []):
+                    u = p.get("url") or ""
+                    if not u:
+                        continue
+                    pages_payload.append({
+                        "url": u,
+                        "title": p.get("title") or u,
+                        "content": (p.get("content") or p.get("content_summary") or "")
+                    })
+
+                basic_output = {
+                    "base_url": base_url,
+                    "discovered_count": len(discovered_urls),
+                    "extracted_count": len(pages_payload),
+                    "discovered_urls": discovered_urls,
+                    "pages": pages_payload,
+                }
+                out_path = out_dir / f"tavily_extract_{framework_id}_{ts}.json"
+                with open(out_path, "w", encoding="utf-8") as f:
+                    json.dump(basic_output, f, ensure_ascii=False, indent=2)
+
+                # With code blocks (attach to page entries)
+                page_by_url = {p["url"]: p for p in pages_payload}
+                total_blocks = 0
+                try:
+                    max_code_urls = int(os.getenv("TEST_MAX_CODE_URLS", "40"))
+                except Exception:
+                    max_code_urls = 40
+                target_urls = (discovered_urls[:max_code_urls] if discovered_urls else [p["url"] for p in pages_payload][:max_code_urls])
+
+                for u in target_urls:
+                    try:
+                        blocks = collector._extract_code_blocks_from_url(u) or []
+                    except Exception:
+                        blocks = []
+                    if blocks:
+                        total_blocks += len(blocks)
+                        if u in page_by_url:
+                            page_by_url[u]["code_blocks"] = blocks
+                        else:
+                            page_by_url[u] = {"url": u, "title": u, "content": "", "code_blocks": blocks}
+
+                updated_pages = []
+                seen = set()
+                for p in pages_payload:
+                    u = p["url"]
+                    if u in page_by_url and u not in seen:
+                        updated_pages.append(page_by_url[u])
+                        seen.add(u)
+                for u, p in page_by_url.items():
+                    if u not in seen:
+                        updated_pages.append(p)
+
+                with_code_output = dict(basic_output)
+                with_code_output["pages"] = updated_pages
+                with_code_output["total_code_blocks"] = total_blocks
+
+                code_path = out_dir / f"tavily_extract_{framework_id}_{ts}_with_code.json"
+                with open(code_path, "w", encoding="utf-8") as f:
+                    json.dump(with_code_output, f, ensure_ascii=False, indent=2)
+
+                print({"saved": str(out_path), "saved_with_code": str(code_path), "discovered": len(discovered_urls), "extracted": len(pages_payload), "total_code_blocks": total_blocks})
+            except Exception as _e:
+                print(f"Tavily-style results write skipped for {framework_name}: {_e}")
 
         except Exception as e:
             print(f"An error occurred while processing {framework_name}: {e}")

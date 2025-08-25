@@ -11,10 +11,11 @@ This module provides the core learning orchestration with:
 
 import logging
 import json
-from typing import Dict, List, Any, TypedDict
+from typing import Dict, List, Any, TypedDict, Optional
 from langchain_core.language_models.base import BaseLanguageModel
 from ..graph.function_graph import FunctionStateGraph, NodeWrapper
 from ..graph.constants import START, END
+from pathlib import Path
 
 # Setup logging (avoid duplicate basicConfig)
 if not logging.getLogger().handlers:
@@ -178,6 +179,12 @@ class SimpleLearningHub:
             "session": self.current_session,
             "framework": context.get("framework", self.current_session["framework"]),
         }
+        # Propagate any accumulated Socratic instructor add-back guidance from session
+        try:
+            if self.current_session.get("soc_addback") and not enhanced_context.get("soc_addback"):
+                enhanced_context["soc_addback"] = list(self.current_session.get("soc_addback") or [])
+        except Exception:
+            pass
         # Load persisted learning state and merge
         try:
             loaded_state = self._load_learning_state(user_id)
@@ -207,9 +214,9 @@ class SimpleLearningHub:
                         pass
             if framework_config:
                 enhanced_context["framework_config"] = framework_config
-            # Load dynamic curriculum if available
-            cur_path = _Path("data/curriculums/dynamic_curriculum_langchain.json") if fw == "langchain" else None
-            if cur_path and cur_path.exists():
+                        # Load dynamic curriculum if available
+            cur_path = _Path(f"data/curriculums/dynamic_curriculum_{fw}.json")
+            if cur_path.exists():
                 try:
                     import json as _json
                     enhanced_context["curriculum"] = _json.loads(cur_path.read_text(encoding="utf-8"))
@@ -339,6 +346,64 @@ class SimpleLearningHub:
                     "study_mode": False,
                     "interaction_count": self.current_session["interaction_count"],
                 })
+                # If Study Mode is ON, post-process through Socratic short prompt to keep Socratic tone
+                try:
+                    if self.study_mode and self.is_agent_available("socratic_instructor"):
+                        try:
+                            si = self.agents.get("socratic_instructor")
+                            # Compose a brief transformation prompt for Socratic follow-up
+                            followup = await si.socratic_response(
+                                query=f"Given this assistant output, reframe with 1-2 guiding questions and a next step: {response_dict.get('content','')}",
+                                context=enhanced_context,
+                            )
+                            if isinstance(followup, dict) and followup.get("content"):
+                                response_dict["content"] = followup["content"]
+                                # propagate suggestions if any
+                                if followup.get("suggestions") is not None:
+                                    response_dict["suggestions"] = followup.get("suggestions")
+                                response_dict["mode"] = "study_mode"
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+
+                # SocREval-inspired Socratic judge (reference-free) using Gemini when available
+                try:
+                    # Enable judge only after 10 interactions to reduce early-turn latency
+                    if int(self.current_session.get("interaction_count", 0) or 0) >= 10:
+                        from ..tools.soc_eval import judge_socratic
+                        judge = judge_socratic(user_problem=query, agent_reply=response_dict.get("content", ""))
+                        if isinstance(judge, dict):
+                            self.current_session["last_socratic_judge"] = judge
+                            addback = judge.get("instructor_addback") or []
+                            if addback:
+                                prev: List[str] = enhanced_context.get("soc_addback", []) or []
+                                enhanced_context["soc_addback"] = (prev + list(addback))[-8:]
+                                try:
+                                    self.current_session["soc_addback"] = list(enhanced_context["soc_addback"])  # copy
+                                except Exception:
+                                    pass
+                                # If the responder was Socratic instructor, append a short reinforcement line
+                                if selected_agent == "socratic_instructor" and isinstance(response_dict.get("content"), str):
+                                    guidance = "\n\n[Instructor guidance applied this turn]"
+                                    response_dict["content"] = (response_dict["content"] or "") + guidance
+                            # Attach judge summary fields to response metadata for UI/logging
+                            response_dict["socratic_judge"] = {
+                                k: judge.get(k)
+                                for k in [
+                                    "overall_socratic",
+                                    "questioning_guidance",
+                                    "question_quality",
+                                    "scaffolding",
+                                    "avoids_direct_answers",
+                                    "reflection_encouragement",
+                                    "socratic_question_ratio",
+                                ]
+                                if k in judge
+                            }
+                except Exception:
+                    # Judge is optional; ignore failures
+                    pass
 
                 # Update learning state and persist
                 try:
@@ -400,7 +465,6 @@ class SimpleLearningHub:
 
         flow = [
             START >> route_node,
-            # Route to one of the stages, then finish
             route_node >> {"onboarding": onboarding, "scoping": scoping, "build": build, "direct": direct},
             onboarding >> END,
             scoping >> END,
@@ -412,9 +476,55 @@ class SimpleLearningHub:
     def _route_stage(self, state: StudyState) -> Dict[str, Any]:
         query = state.get("query", "")
         ctx = state.get("context", {})
-        # Heuristic: if user mentions build/code/agent, bias to build stage
-        ql = (query or "").lower()
-        # Respect onboarding stage guidance for Study Mode
+
+        # 1) LLM-first routing with confidence
+        try:
+            prompt = (
+                "Route the user request to one agent and stage.\n"
+                "Agents: [\"instructor\",\"code_assistant\",\"code_generator\",\"practice\",\"socratic_instructor\"].\n"
+                "Stages: [\"onboarding\",\"scoping\",\"build\",\"direct\"].\n"
+                f"Context: {{\"framework\": \"{ctx.get('framework','')}\", \"interaction_count\": {int(ctx.get('interaction_count', 0) or 0)}, \"study_mode\": {bool(ctx.get('study_mode'))} }}\n"
+                f"User: \"{query}\"\n"
+                "Return ONLY strict JSON: {\"agent\":\"...\",\"stage\":\"onboarding|scoping|build|direct\",\"confidence\":0.0-1.0}"
+            )
+            resp = self.llm.invoke(prompt)
+            body = getattr(resp, "content", str(resp)) or "{}"
+            # Be tolerant to fenced JSON by extracting last JSON object when needed
+            try:
+                data = json.loads(body.strip())
+            except Exception:
+                try:
+                    # Simple extraction of the last {...}
+                    import re as _re
+                    m = _re.search(r"\{[\s\S]*\}$", body.strip()) or _re.search(r"\{[\s\S]*\}", body)
+                    data = json.loads(m.group(0)) if m else {}
+                except Exception:
+                    data = {}
+
+            agent = str((data or {}).get("agent") or "").strip()
+            stage = str((data or {}).get("stage") or "").strip()
+            try:
+                conf = float((data or {}).get("confidence") or 0.0)
+            except Exception:
+                conf = 0.0
+
+            # Confidence-gated: if build suggested but low confidence, prefer scoping to clarify
+            if stage == "build" and conf < 0.7:
+                ctx["_orchestrated_agent"] = "socratic_instructor"
+                state["context"] = ctx
+                state["next"] = "scoping"
+                return state
+
+            if agent in {"instructor", "code_assistant", "code_generator", "practice", "socratic_instructor"} \
+               and stage in {"onboarding", "scoping", "build", "direct"} and conf >= 0.5:
+                ctx["_orchestrated_agent"] = agent
+                state["context"] = ctx
+                state["next"] = stage
+                return state
+        except Exception:
+            pass
+
+        # 2) Fallback: Study Mode onboarding guidance from session
         try:
             session = ctx.get("session", {}) or {}
             onboarding_stage = session.get("onboarding_stage")
@@ -425,38 +535,22 @@ class SimpleLearningHub:
                     state["next"] = "onboarding"
                     return state
                 if onboarding_stage == "build_agent":
-                    ctx["_orchestrated_agent"] = "code_assistant"
+                    # default to scoping first unless later LLM confirms build
+                    ctx["_orchestrated_agent"] = "socratic_instructor"
                     state["context"] = ctx
-                    state["next"] = "build"
+                    state["next"] = "scoping"
                     return state
         except Exception:
             pass
+
+        # 3) Last-resort heuristic if LLM JSON unavailable
+        ql = (query or "").lower()
         if any(k in ql for k in ["build", "agent", "example", "code", "implement", "create"]):
-            ctx["_orchestrated_agent"] = "code_assistant"
+            ctx["_orchestrated_agent"] = "code_generator" if self.is_agent_available("code_generator") else "code_assistant"
             state["context"] = ctx
             state["next"] = "build"
             return state
-        try:
-            prompt = (
-                "Route the user request to one agent. Agents: [\"instructor\",\"code_assistant\",\"practice\",\"socratic_instructor\"].\n"
-                "Stages: [\"onboarding\",\"scoping\",\"build\",\"direct\"].\n"
-                f"Context: {{\"framework\": \"{ctx.get('framework','')}\", \"interaction_count\": {int(ctx.get('interaction_count', 0) or 0)} }}\n"
-                f"User: \"{query}\"\n"
-                "Return ONLY JSON: {\"agent\":\"...\",\"stage\":\"onboarding|scoping|build|direct\"}"
-            )
-            resp = self.llm.invoke(prompt)
-            data = json.loads(getattr(resp, "content", str(resp)).strip())
-            agent = data.get("agent")
-            stage = data.get("stage")
-            if agent in {"instructor", "code_assistant", "practice", "socratic_instructor"} and stage in {"onboarding", "scoping", "build", "direct"}:
-                # keep agent hint in context for stage nodes if needed
-                ctx["_orchestrated_agent"] = agent
-                state["context"] = ctx
-                state["next"] = stage
-                return state
-        except Exception:
-            pass
-        # Fallback heuristic
+
         stage = "onboarding" if self.current_session["interaction_count"] <= 2 else "scoping"
         state["next"] = stage
         return state
@@ -465,11 +559,11 @@ class SimpleLearningHub:
         # Read the desired next stage written by _route_stage
         return state.get("next", "onboarding")
 
-    def _node_onboarding(self, state: StudyState) -> StudyState:
+    async def _node_onboarding(self, state: StudyState) -> StudyState:
         q, ctx = state.get("query", ""), state.get("context", {})
         ctx["stage"] = "onboarding"
         agent = self.agents.get("socratic_instructor")
-        res = agent.invoke(q, is_save_memory=True, user_id=ctx.get("session", {}).get("user_id", "default"), learning_context=ctx)
+        res = await agent.ainvoke(q, is_save_memory=True, user_id=ctx.get("session", {}).get("user_id", "default"), learning_context=ctx)
         # Preserve structured fields if the agent returns a dict
         if isinstance(res, dict):
             state["content"] = res.get("content", "")
@@ -486,13 +580,41 @@ class SimpleLearningHub:
             content = getattr(res, "content", res if isinstance(res, str) else str(res))
             state["content"] = content
             state["agent_used"] = "socratic_instructor"
+        # SocREval-style judge to derive add-back guidance
+        try:
+            if int(self.current_session.get("interaction_count", 0) or 0) >= 10:
+                from ..tools.soc_eval import judge_socratic
+                judge = judge_socratic(user_problem=q, agent_reply=state.get("content", ""))
+                if isinstance(judge, dict):
+                    self.current_session["last_socratic_judge"] = judge
+                    addback = judge.get("instructor_addback") or []
+                    if addback:
+                        prev = ctx.get("soc_addback", []) or []
+                        ctx["soc_addback"] = (prev + list(addback))[-8:]
+                        self.current_session["soc_addback"] = list(ctx["soc_addback"])  # persist
+                    state["socratic_judge"] = {
+                        k: judge.get(k)
+                        for k in [
+                            "overall_socratic",
+                            "questioning_guidance",
+                            "question_quality",
+                            "scaffolding",
+                            "avoids_direct_answers",
+                            "reflection_encouragement",
+                            "socratic_question_ratio",
+                        ]
+                        if k in judge
+                    }
+                    state["context"] = ctx
+        except Exception:
+            pass
         return state
 
-    def _node_scoping(self, state: StudyState) -> StudyState:
+    async def _node_scoping(self, state: StudyState) -> StudyState:
         q, ctx = state.get("query", ""), state.get("context", {})
         ctx["stage"] = "scoping"
         agent = self.agents.get("socratic_instructor")
-        res = agent.invoke(q, is_save_memory=True, user_id=ctx.get("session", {}).get("user_id", "default"), learning_context=ctx)
+        res = await agent.ainvoke(q, is_save_memory=True, user_id=ctx.get("session", {}).get("user_id", "default"), learning_context=ctx)
         if isinstance(res, dict):
             state["content"] = res.get("content", "")
             state["agent_used"] = "socratic_instructor"
@@ -508,26 +630,186 @@ class SimpleLearningHub:
             content = getattr(res, "content", res if isinstance(res, str) else str(res))
             state["content"] = content
             state["agent_used"] = "socratic_instructor"
+        # SocREval-style judge to derive add-back guidance
+        try:
+            if int(self.current_session.get("interaction_count", 0) or 0) >= 10:
+                from ..tools.soc_eval import judge_socratic
+                judge = judge_socratic(user_problem=q, agent_reply=state.get("content", ""))
+                if isinstance(judge, dict):
+                    self.current_session["last_socratic_judge"] = judge
+                    addback = judge.get("instructor_addback") or []
+                    if addback:
+                        prev = ctx.get("soc_addback", []) or []
+                        ctx["soc_addback"] = (prev + list(addback))[-8:]
+                        self.current_session["soc_addback"] = list(ctx["soc_addback"])  # persist
+                    state["socratic_judge"] = {
+                        k: judge.get(k)
+                        for k in [
+                            "overall_socratic",
+                            "questioning_guidance",
+                            "question_quality",
+                            "scaffolding",
+                            "avoids_direct_answers",
+                            "reflection_encouragement",
+                            "socratic_question_ratio",
+                        ]
+                        if k in judge
+                    }
+                    state["context"] = ctx
+        except Exception:
+            pass
         return state
 
-    def _node_build(self, state: StudyState) -> StudyState:
+    async def _node_build(self, state: StudyState) -> StudyState:
         q, ctx = state.get("query", ""), state.get("context", {})
         ctx["stage"] = "build"
-        agent = self.agents.get("code_assistant")
-        res = agent.invoke(q, is_save_memory=True, user_id=ctx.get("session", {}).get("user_id", "default"), learning_context=ctx)
-        content = getattr(res, "content", res if isinstance(res, str) else str(res))
-        state["content"] = content
-        state["agent_used"] = "code_assistant"
+        # Prefer code_generator when available
+        agent_key = "code_generator" if self.is_agent_available("code_generator") else "code_assistant"
+        agent = self.agents.get(agent_key)
+        res = await agent.ainvoke(q, is_save_memory=True, user_id=ctx.get("session", {}).get("user_id", "default"), learning_context=ctx)
+        # If generator returns a dict with validation results, pass through structured response
+        if isinstance(res, dict) and (res.get("quality_score") is not None or res.get("tests_passed") is not None):
+            passed = bool(res.get('tests_passed'))
+            # Try to persist generated files to disk if present in the result
+            written_paths: List[str] = []
+            main_file_path: Optional[Path] = None
+            try:
+                code = res.get("code")
+                file_name = res.get("file_name") or "main.py"
+                test_code = res.get("test_code")
+                test_file_name = res.get("test_file_name") or "test_main.py"
+                framework_id = ctx.get("framework", self.current_session.get("framework", "default"))
+                base_dir = Path(f"generated/{framework_id}")
+                # Only create base_dir if we actually have something to write
+                if code or test_code:
+                    base_dir.mkdir(parents=True, exist_ok=True)
+                if code:
+                    main_file_path = base_dir / file_name
+                    main_file_path.write_text(code, encoding="utf-8")
+                    written_paths.append(str(main_file_path))
+                if test_code:
+                    test_path = base_dir / test_file_name
+                    test_path.write_text(test_code, encoding="utf-8")
+                    written_paths.append(str(test_path))
+            except Exception as e:
+                if self.is_logging:
+                    logger.warning(f"Failed to write generated files: {e}")
+            if written_paths:
+                state["written_files"] = written_paths
+            state["content"] = f"Code generated. Quality: {res.get('quality_score', 0)}. Tests passed: {passed}." + (f"\nFiles written: {', '.join(written_paths)}" if written_paths else "")
+            state["agent_used"] = agent_key
+            state["type"] = "code_result"
+            # Attach brief suggestions for next step
+            state["suggestions"] = [
+                "Open generated files and run locally",
+                "Ask to add tests or improve quality",
+                "Request an explanation of the code"
+            ]
+        else:
+            content = getattr(res, "content", res if isinstance(res, str) else str(res))
+            state["content"] = content
+            state["agent_used"] = agent_key
+        if self.study_mode:
+            return self._apply_socratic_postprocess(state, q, ctx)
+        # In Study Mode path, keep Socratic tone: reframe with guiding questions when possible
+        try:
+            si = self.agents.get("socratic_instructor")
+            if si:
+                follow = si.invoke(
+                    f"Reframe this assistant output with 1-2 guiding questions and a clear next step:\n{state.get('content','')}",
+                    is_save_memory=False,
+                    user_id=ctx.get("session", {}).get("user_id", "default"),
+                    learning_context=ctx,
+                )
+                if isinstance(follow, dict) and follow.get("content"):
+                    state["content"] = follow["content"]
+                    state.setdefault("suggestions", follow.get("suggestions"))
+                    state["mode"] = "study_mode"
+        except Exception:
+            pass
+        # SocREval-style judge to derive add-back guidance
+        try:
+            if int(self.current_session.get("interaction_count", 0) or 0) >= 10:
+                from ..tools.soc_eval import judge_socratic
+                judge = judge_socratic(user_problem=q, agent_reply=state.get("content", ""))
+                if isinstance(judge, dict):
+                    self.current_session["last_socratic_judge"] = judge
+                    addback = judge.get("instructor_addback") or []
+                    if addback:
+                        prev = ctx.get("soc_addback", []) or []
+                        ctx["soc_addback"] = (prev + list(addback))[-8:]
+                        self.current_session["soc_addback"] = list(ctx["soc_addback"])  # persist
+                    state["socratic_judge"] = {
+                        k: judge.get(k)
+                        for k in [
+                            "overall_socratic",
+                            "questioning_guidance",
+                            "question_quality",
+                            "scaffolding",
+                            "avoids_direct_answers",
+                            "reflection_encouragement",
+                            "socratic_question_ratio",
+                        ]
+                        if k in judge
+                    }
+                    state["context"] = ctx
+        except Exception:
+            pass
         return state
 
-    def _node_direct(self, state: StudyState) -> StudyState:
+    async def _node_direct(self, state: StudyState) -> StudyState:
         q, ctx = state.get("query", ""), state.get("context", {})
         ctx["stage"] = "direct"
         agent = self.agents.get("instructor")
-        res = agent.invoke(q, is_save_memory=True, user_id=ctx.get("session", {}).get("user_id", "default"), learning_context=ctx)
+        res = await agent.ainvoke(q, is_save_memory=True, user_id=ctx.get("session", {}).get("user_id", "default"), learning_context=ctx)
         content = getattr(res, "content", res if isinstance(res, str) else str(res))
         state["content"] = content
         state["agent_used"] = "instructor"
+        if self.study_mode:
+            return self._apply_socratic_postprocess(state, q, ctx)
+        # In Study Mode path, keep Socratic tone: reframe with guiding questions when possible
+        try:
+            si = self.agents.get("socratic_instructor")
+            if si:
+                follow = si.invoke(
+                    f"Reframe this assistant output with 1-2 guiding questions and a clear next step:\n{state.get('content','')}",
+                    is_save_memory=False,
+                    user_id=ctx.get("session", {}).get("user_id", "default"),
+                    learning_context=ctx,
+                )
+                if isinstance(follow, dict) and follow.get("content"):
+                    state["content"] = follow["content"]
+                    state.setdefault("suggestions", follow.get("suggestions"))
+                    state["mode"] = "study_mode"
+        except Exception:
+            pass
+        # SocREval-style judge to derive add-back guidance
+        try:
+            from ..tools.soc_eval import judge_socratic
+            judge = judge_socratic(user_problem=q, agent_reply=state.get("content", ""))
+            if isinstance(judge, dict):
+                self.current_session["last_socratic_judge"] = judge
+                addback = judge.get("instructor_addback") or []
+                if addback:
+                    prev = ctx.get("soc_addback", []) or []
+                    ctx["soc_addback"] = (prev + list(addback))[-8:]
+                    self.current_session["soc_addback"] = list(ctx["soc_addback"])  # persist
+                state["socratic_judge"] = {
+                    k: judge.get(k)
+                    for k in [
+                        "overall_socratic",
+                        "questioning_guidance",
+                        "question_quality",
+                        "scaffolding",
+                        "avoids_direct_answers",
+                        "reflection_encouragement",
+                        "socratic_question_ratio",
+                    ]
+                    if k in judge
+                }
+                state["context"] = ctx
+        except Exception:
+            pass
         return state
     
     def _route_to_agent(self, query: str) -> str:
@@ -912,3 +1194,54 @@ class SimpleLearningHub:
         return (
             f"Welcome back to {framework.title()}! Would you like a quick recap, continue where you left off, or do a short practice? {mode_hint}"
         )
+
+    def _apply_socratic_postprocess(self, state: StudyState, q: str, ctx: Dict[str, Any]) -> StudyState:
+        """Reframe content with Socratic questions and persist SocREval add-back guidance.
+        Expects study_mode already enabled in the calling path.
+        """
+        # Reframe to Socratic style with a clear next step
+        try:
+            si = self.agents.get("socratic_instructor")
+            if si:
+                follow = si.invoke(
+                    f"Reframe this assistant output with 1-2 guiding questions and a clear next step:\n{state.get('content','')}",
+                    is_save_memory=False,
+                    user_id=ctx.get("session", {}).get("user_id", "default"),
+                    learning_context=ctx,
+                )
+                if isinstance(follow, dict) and follow.get("content"):
+                    state["content"] = follow["content"]
+                    if follow.get("suggestions") is not None:
+                        state.setdefault("suggestions", follow.get("suggestions"))
+                    state["mode"] = "study_mode"
+        except Exception:
+            pass
+        # Run SocREval-style judge to extract add-back guidance and persist
+        try:
+            if int(self.current_session.get("interaction_count", 0) or 0) >= 10:
+                from ..tools.soc_eval import judge_socratic
+                judge = judge_socratic(user_problem=q, agent_reply=state.get("content", ""))
+                if isinstance(judge, dict):
+                    self.current_session["last_socratic_judge"] = judge
+                    addback = judge.get("instructor_addback") or []
+                    if addback:
+                        prev = ctx.get("soc_addback", []) or []
+                        ctx["soc_addback"] = (prev + list(addback))[-8:]
+                        self.current_session["soc_addback"] = list(ctx["soc_addback"])  # persist
+                    state["socratic_judge"] = {
+                        k: judge.get(k)
+                        for k in [
+                            "overall_socratic",
+                            "questioning_guidance",
+                            "question_quality",
+                            "scaffolding",
+                            "avoids_direct_answers",
+                            "reflection_encouragement",
+                            "socratic_question_ratio",
+                        ]
+                        if k in judge
+                    }
+                    state["context"] = ctx
+        except Exception:
+            pass
+        return state

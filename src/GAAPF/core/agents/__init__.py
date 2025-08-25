@@ -141,6 +141,7 @@ When helping users, focus on being clear, helpful, and educational in your respo
 
         return f"""You are a {self.agent_type} agent helping {user_name}, a {user_level} level learner.{task_instruction}
 
+
 **Current Context:**
 - Student: {user_name} ({user_level} level)
 - Learning Focus: {framework_name}

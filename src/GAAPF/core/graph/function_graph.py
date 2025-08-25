@@ -59,9 +59,19 @@ class FunctionStateGraph(StateGraph):
         self.node_instances[name] = node
         # Check if node expects config in its execution
         if hasattr(node, 'config') and (not node.config is None):
-            runnable = coerce_to_runnable(lambda state, config: node(state, config), name=name, trace=True)
+            async def _fn(state, config):
+                res = node(state, config)
+                if inspect.iscoroutine(res):
+                    return await res
+                return res
+            runnable = coerce_to_runnable(_fn, name=name, trace=True)
         else:
-            runnable = coerce_to_runnable(lambda state: node(state), name=name, trace=True)
+            async def _fn(state):
+                res = node(state)
+                if inspect.iscoroutine(res):
+                    return await res
+                return res
+            runnable = coerce_to_runnable(_fn, name=name, trace=True)
         super().add_node(name, runnable)
         return self
 

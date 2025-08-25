@@ -80,6 +80,11 @@ class SimpleCLI:
         self.user_id = "default"
         self.session_id = f"session_{uuid.uuid4().hex[:8]}"
         
+        # Flags to skip interactive prompts when passed from outer CLI
+        self._preconfigured_framework = False
+        self._preconfigured_user_id = False
+        self._preconfigured_study = False
+        
         if self.is_logging:
             print(f"SimpleCLI initialized with {len(self.agents)} agents")
     
@@ -103,16 +108,14 @@ class SimpleCLI:
 🤖 **Welcome to GAAPF - Simplified Learning System**
 
 **Available Commands:**
-• `/study`     - Enable Study Mode (learn through questions) 🤔
-• `/direct`    - Enable Direct Mode (get direct answers) 📚  
 • `/framework` - Change learning framework
 • `/info`      - Show session information
+• `/history`   - Show recent conversation history
 • `/help`      - Show this help message
 • `/quit`      - Exit GAAPF
 
-**Learning Modes:**
+**Learning Mode:**
 • **Study Mode**: Learn through guided questions (Socratic method)
-• **Direct Mode**: Get immediate answers and explanations
 
 **Supported Frameworks:**
 • LangChain, LangGraph, CrewAI, AutoGen
@@ -124,20 +127,36 @@ class SimpleCLI:
         """Simple session setup with framework and mode selection."""
         self.console.print("\n🚀 Let's set up your learning session!", style="info")
         
-        # Framework selection
-        frameworks = ["langchain", "langgraph", "crewai", "autogen"]
-        
-        self.console.print("\n📚 **Select a framework to learn:**")
-        for i, fw in enumerate(frameworks, 1):
-            self.console.print(f"  {i}. {fw.title()}")
-        
-        choice = Prompt.ask("Choose framework (1-4)", default="1")
+        # Framework selection (dynamic: allowed_domains + vectordb folders)
         try:
-            self.current_framework = frameworks[int(choice) - 1]
-            self.console.print(f"✅ Selected: **{self.current_framework.title()}**", style="success")
-        except (ValueError, IndexError):
-            self.current_framework = "langchain"
-            self.console.print("✅ Defaulted to: **LangChain**", style="success")
+            from ...core.tools.framework_collector import FrameworkCollector
+            fc = FrameworkCollector(is_logging=self.is_logging)
+            allowed = list((fc.allowed_domains or {}).keys())
+        except Exception:
+            allowed = ["langchain", "langgraph", "crewai", "autogen"]
+        try:
+            vectordb_root = Path("data/frameworks/vectordb")
+            existing = [p.name for p in vectordb_root.iterdir() if p.is_dir()]
+        except Exception:
+            existing = []
+        # Merge and sort unique list
+        frameworks = sorted(set(allowed) | set(existing)) or ["langchain", "langgraph", "crewai", "autogen"]
+        
+        # If framework pre-configured and valid, skip prompt
+        if not self._preconfigured_framework or self.current_framework not in frameworks:
+            self.console.print("\n📚 **Select a framework to learn:**")
+            for i, fw in enumerate(frameworks, 1):
+                self.console.print(f"  {i}. {fw.title()}")
+            
+            choice = Prompt.ask(f"Choose framework (1-{len(frameworks)})", default="1")
+            try:
+                self.current_framework = frameworks[int(choice) - 1]
+                self.console.print(f"✅ Selected: **{self.current_framework.title()}**", style="success")
+            except (ValueError, IndexError):
+                self.current_framework = "langchain"
+                self.console.print("✅ Defaulted to: **LangChain**", style="success")
+        else:
+            self.console.print(f"\n✅ Framework: **{self.current_framework.title()}** (pre-configured)", style="success")
         
         # Set framework in hub
         self.hub.set_framework(self.current_framework)
@@ -154,35 +173,43 @@ class SimpleCLI:
         # Rebuild agents with per-framework memory to keep context separated
         from pathlib import Path as _Path
         mem_file = _Path(f"templates/memory_{self.current_framework}.json")
+        # Extend agents with generator for build stage; repair disabled
+        try:
+            from ...core.agents.code_generator import CodeGenerationAgent
+            gen_agent = CodeGenerationAgent(self.llm, is_logging=self.is_logging, memory_path=mem_file)
+        except Exception:
+            gen_agent = None
         self.agents = {
             "instructor": InstructorAgent(self.llm, is_logging=self.is_logging, memory_path=mem_file),
             "code_assistant": CodeAssistantAgent(self.llm, is_logging=self.is_logging, memory_path=mem_file),
             "practice": PracticeFacilitatorAgent(self.llm, is_logging=self.is_logging, memory_path=mem_file),
             "socratic_instructor": SocraticInstructorAgent(self.llm, is_logging=self.is_logging, memory_path=mem_file),
         }
+        if gen_agent:
+            self.agents["code_generator"] = gen_agent
         # Update hub agents reference
         self.hub.agents = self.agents
-        
-        # Ask for user id to keep session consistent
+        # Ensure all agents use the hub's shared session memory (short-term transcript + learning state)
         try:
-            entered_id = Prompt.ask("\n👤 Enter your user id", default=self.user_id or "default").strip()
-            if entered_id:
-                self.user_id = entered_id
+            self.hub._update_agents_memory()
         except Exception:
             pass
         
-        # Study mode preference
-        use_study_mode = Confirm.ask(
-            "\n🤔 **Enable Study Mode?** (Learn through guided questions)", 
-            default=True
-        )
-        
-        if use_study_mode:
-            self.hub.enable_study_mode()
-            self.study_mode = True
-            self.console.print("🤔 **Study Mode activated!** - You'll learn through discovery", style="study_mode")
+        # Ask for user id to keep session consistent only if not preconfigured
+        if not self._preconfigured_user_id:
+            try:
+                entered_id = Prompt.ask("\n👤 Enter your user id", default=self.user_id or "default").strip()
+                if entered_id:
+                    self.user_id = entered_id
+            except Exception:
+                pass
         else:
-            self.console.print("📚 **Direct Mode activated!** - You'll get direct answers", style="primary")
+            self.console.print(f"👤 User ID: {self.user_id} (pre-configured)", style="muted")
+        
+        # Force Study Mode as the only mode
+        self.study_mode = True
+        self.hub.enable_study_mode()
+        self.console.print("🤔 **Study Mode activated!** - You'll learn through discovery", style="study_mode")
     
     async def conversation_loop(self):
         """Main conversation loop with user."""
@@ -241,7 +268,7 @@ class SimpleCLI:
             }
             
             # Process query through hub
-            response = await self.hub.process_query(query, context)
+            response = await self.hub.process_query(query, context, user_id=self.user_id)
         
         # Display response
         self.display_response(response)
@@ -289,28 +316,17 @@ class SimpleCLI:
         cmd = command.lower().strip()
         
         if cmd == "/study":
+            # Study Mode is always on
             self.hub.enable_study_mode()
             self.study_mode = True
-            self.console.print(Panel(
-                "🤔 **Study Mode Activated!**\n\n"
-                "• I'll guide you with questions instead of direct answers\n"
-                "• Think through problems step by step\n"
-                "• Ask for hints if you get stuck\n"
-                "• Type `/direct` to switch back to direct answers",
-                style="study_mode",
-                title="Study Mode"
-            ))
+            self.console.print("(Study Mode is always enabled)", style="muted")
             
         elif cmd == "/direct":
-            self.hub.disable_study_mode()
-            self.study_mode = False
+            # Direct mode disabled
             self.console.print(Panel(
-                "📚 **Direct Mode Activated!**\n\n"
-                "• I'll provide direct answers and explanations\n"
-                "• Faster learning for quick questions\n"
-                "• Type `/study` to switch to guided learning",
-                style="primary",
-                title="Direct Mode"
+                "Only Study Mode is available in this build.",
+                style="study_mode",
+                title="Mode Locked"
             ))
             
         elif cmd == "/framework":
@@ -330,7 +346,7 @@ class SimpleCLI:
                 recent = []
                 if getattr(agent, "memory", None):
                     # Pull last 6 messages to display as 3 exchanges
-                    recent = agent.memory.get_recent_chat(user_id="default", framework=self.current_framework, k=6)
+                    recent = agent.memory.get_recent_chat(user_id=self.user_id, framework=self.current_framework, k=6)
                 if not recent:
                     self.console.print("(No recent history)", style="muted")
                 else:

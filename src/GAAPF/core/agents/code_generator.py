@@ -17,7 +17,7 @@ from langchain_core.tools import BaseTool
 
 from . import SpecializedAgent
 from ..core.content.code_generator import CodeGenerator
-from ..tools.sandbox_runner import SandboxRunner
+# Sandbox-based validation removed from main flow
 
 # Setup logging
 logger = logging.getLogger(__name__)
@@ -73,7 +73,7 @@ class CodeGenerationAgent(SpecializedAgent):
         # Code generation specific attributes
         self.max_retries = max_retries
         self.quality_threshold = quality_threshold
-        self.sandbox = SandboxRunner(timeout=15, memory_limit_mb=512)
+        # Sandbox disabled; no runtime execution in validation
         
         # Initialize the existing CodeGenerator for content creation
         self.content_generator = CodeGenerator(
@@ -88,8 +88,18 @@ class CodeGenerationAgent(SpecializedAgent):
             logger.info(f"CodeGenerationAgent initialized with quality_threshold={quality_threshold}")
     
     def _generate_system_prompt(self, learning_context: Optional[Dict] = None) -> str:
-        """Generate system prompt for code generation tasks."""
-        return """You are a Python Code Generation Agent specialized in creating high-quality, tested code.
+        """Generate system prompt for code generation tasks.
+        Important: Use literal '{{' and '}}' for JSON braces to avoid ChatPromptTemplate variable parsing.
+        """
+        try:
+            fw = (learning_context or {}).get("framework")
+        except Exception:
+            fw = None
+        target_fw_line = ("\nTarget framework: " + str(fw) + ". Prefer official APIs and idiomatic patterns for this framework.") if fw else ""
+        # Build as a normal string (not f-string) so '{{' and '}}' remain doubled for ChatPromptTemplate
+        system_core = """You are a Python Code Generation Agent specialized in creating high-quality, tested code."""
+        system_core += target_fw_line + """
+
 
 **Your Core Responsibilities:**
 1. Generate clean, well-documented Python code based on specifications
@@ -111,17 +121,20 @@ class CodeGenerationAgent(SpecializedAgent):
 - Follow the principle of least privilege
 
 **Output Format:**
-Always return your response as JSON with the following structure:
-{
+Always return your response as JSON with the following structure and NOTHING else (no markdown fences, no prose before/after):
+{{
     "code": "# Your generated Python code here",
     "test_code": "# Corresponding pytest test code",
     "file_name": "suggested_filename.py",
     "test_file_name": "test_suggested_filename.py",
     "explanation": "Brief explanation of the implementation",
     "dependencies": ["list", "of", "required", "packages"]
-}
+}}
+
+Return only raw JSON. Do not include any extra text.
 
 Be precise, secure, and always generate working code."""
+        return system_core
     
     async def generate_code(self, specification: str, context: Dict = None) -> Dict[str, Any]:
         """
@@ -141,7 +154,7 @@ Be precise, secure, and always generate working code."""
         
         # Prepare the prompt
         prompt_template = ChatPromptTemplate.from_messages([
-            ("system", self._generate_system_prompt()),
+            ("system", self._generate_system_prompt(context)),
             ("human", """Generate Python code for the following specification:
 
 Specification: {specification}
@@ -151,7 +164,12 @@ Context:
 - User Level: {user_level}
 - Additional Requirements: {additional_requirements}
 
-Please generate high-quality Python code with comprehensive tests.""")
+Please generate high-quality Python code with comprehensive tests.
+
+STRICT OUTPUT RULES:
+- Return ONLY raw JSON as specified in the system prompt (no prose, no fences).
+- Ensure the code uses the specified Framework when applicable.
+""")
         ])
         
         # Extract context with defaults
@@ -171,14 +189,60 @@ Please generate high-quality Python code with comprehensive tests.""")
                 
                 # Generate code using LLM
                 chain = prompt_template | self.llm | self.json_parser
-                
+
                 llm_result = await chain.ainvoke({
                     "specification": specification,
                     "framework": framework,
                     "user_level": user_level,
                     "additional_requirements": additional_requirements
                 })
+
+                # Success path: optionally skip heavy validation for fast testing
+                if context.get("skip_validation"):
+                    return {
+                        **llm_result,
+                        "tests_passed": False,
+                        "quality_score": 0,
+                        "generation_attempts": attempt + 1,
+                        "specification": specification,
+                    }
+
+                # Run a single lightweight validation and return immediately
+                validation_result = await self._validate_generated_code(llm_result)
+                return {
+                    **llm_result,
+                    **validation_result,
+                    "generation_attempts": attempt + 1,
+                    "specification": specification,
+                }
+
+            except Exception as parse_error:
+                # Safe logging without problematic characters
+                try:
+                    safe_msg = str(parse_error).encode('ascii', errors='replace').decode('ascii')[:200]
+                except Exception:
+                    safe_msg = str(parse_error)[:200]
+                logger.error(f"JSON parsing failed: {safe_msg}.")
+                # Create a fallback response when JSON parsing fails
+                llm_result = {
+                    "code": "# Generated code (parsing failed)\n# Please provide a clear specification for Python code",
+                    "test_code": "# No tests generated due to parsing error",
+                    "file_name": "generated_code.py",
+                    "test_file_name": "test_generated_code.py",
+                    "explanation": f"Code generation attempted but JSON parsing failed: {str(parse_error)}",
+                    "dependencies": []
+                }
                 
+                # Fast path on parse fallback: optionally skip heavy validation
+                if context.get("skip_validation"):
+                    return {
+                        **llm_result,
+                        "tests_passed": False,
+                        "quality_score": 0,
+                        "generation_attempts": attempt + 1,
+                        "specification": specification,
+                    }
+
                 # Validate the generated code
                 validation_result = await self._validate_generated_code(llm_result)
                 
@@ -261,51 +325,45 @@ Please generate high-quality Python code with comprehensive tests.""")
     
     async def _validate_generated_code(self, llm_result: Dict) -> Dict[str, Any]:
         """
-        Validate generated code by running tests and linting.
-        
-        Args:
-            llm_result: Result from LLM containing code and tests
-            
-        Returns:
-            Dict with validation results and quality metrics
+        Validate generated code using static checks only (no execution).
+        Returns a minimal quality signal based on syntax validity.
         """
         try:
-            # Create temporary files for testing
-            with tempfile.TemporaryDirectory() as temp_dir:
-                temp_path = Path(temp_dir)
-                
-                # Write main code file
-                code_file = temp_path / llm_result.get("file_name", "generated.py")
-                code_file.write_text(llm_result.get("code", ""))
-                
-                # Write test file
-                test_file = temp_path / llm_result.get("test_file_name", "test_generated.py")
-                test_file.write_text(llm_result.get("test_code", ""))
-                
-                # Install dependencies if specified
-                dependencies = llm_result.get("dependencies", [])
-                if dependencies:
-                    deps_str = " ".join(dependencies)
-                    install_result = self.sandbox.run_in_sandbox(
-                        f"pip install {deps_str}",
-                        timeout=30,
-                        cwd=temp_path
-                    )
-                    if install_result["exit_code"] != 0:
-                        logger.warning(f"Failed to install dependencies: {install_result['stderr']}")
-                
-                # Validate using sandbox
-                validation = self.sandbox.validate_code(code_file)
-                
-                return validation
-                
-        except Exception as e:
-            logger.error(f"Code validation failed: {str(e)}")
+            code_text = llm_result.get("code", "") or ""
+            if not code_text:
+                return {
+                    "tests_passed": False,
+                    "quality_score": 0,
+                    "lint_errors": ["Generated code is empty"],
+                    "test_output": "Static validation only; no tests executed",
+                }
+            import ast
+            try:
+                ast.parse(code_text)
+                syntax_ok = True
+            except SyntaxError as se:
+                syntax_ok = False
+                syntax_err = str(se)
+            if syntax_ok:
+                return {
+                    "tests_passed": False,
+                    "quality_score": 50,
+                    "lint_errors": [],
+                    "test_output": "Syntax valid. No tests executed.",
+                }
             return {
                 "tests_passed": False,
                 "quality_score": 0,
-                "lint_errors": [f"Validation error: {str(e)}"],
-                "test_output": f"Validation failed: {str(e)}"
+                "lint_errors": [f"Syntax error"],
+                "test_output": f"Syntax error during static validation: {syntax_err}",
+            }
+        except Exception as e:
+            logger.error(f"Static validation failed: {e}")
+            return {
+                "tests_passed": False,
+                "quality_score": 0,
+                "lint_errors": [f"Validation error: {e}"],
+                "test_output": f"Static validation failed: {e}",
             }
     
     def _prepare_retry_feedback(self, validation_result: Dict) -> str:
@@ -341,7 +399,7 @@ Please generate high-quality Python code with comprehensive tests.""")
         try:
             if getattr(self, "memory", None):
                 framework_id = context.get("framework")
-                uid = getattr(self, "_user_id", None) or kwargs.get("user_id") or "unknown_user"
+                uid = kwargs.get("user_id") or getattr(self, "_user_id", None) or "unknown_user"
                 self.memory.append_chat_message(uid, role="user", content=query, framework=framework_id)
                 self.save_memory(query, user_id=uid)
         except Exception:
@@ -353,8 +411,10 @@ Please generate high-quality Python code with comprehensive tests.""")
         try:
             if getattr(self, "memory", None):
                 framework_id = context.get("framework")
-                uid = getattr(self, "_user_id", None) or kwargs.get("user_id") or "unknown_user"
-                summary = str(result)[:800]
+                uid = kwargs.get("user_id") or getattr(self, "_user_id", None) or "unknown_user"
+                quality = int(result.get("quality_score", 0)) if isinstance(result, dict) else 0
+                passed = bool(result.get("tests_passed")) if isinstance(result, dict) else False
+                summary = f"Code generated. Quality: {quality}. Tests passed: {passed}."
                 self.memory.append_chat_message(uid, role="assistant", content=summary, framework=framework_id)
                 self.save_memory(summary, user_id=uid)
         except Exception:

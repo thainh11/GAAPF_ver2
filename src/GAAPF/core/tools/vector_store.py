@@ -10,6 +10,7 @@ import json
 import logging
 from typing import Dict, List, Optional, Union, Any
 from pathlib import Path
+import shutil
 
 import chromadb
 from langchain_google_vertexai import VertexAIEmbeddings
@@ -63,6 +64,70 @@ class VectorStore:
         # Ensure directory exists
         self.persistent_dir = Path(persistent_dir) if isinstance(persistent_dir, str) else persistent_dir
         self.persistent_dir.parent.mkdir(parents=True, exist_ok=True)
+
+        # Normalize/migrate nested framework directory if present: <fw>/<fw> -> <fw>
+        # Allow disabling during live use to avoid file locks on Windows
+        try:
+            if os.getenv("DISABLE_VS_FLATTEN", "0").strip().lower() in {"1", "true", "yes", "y"}:
+                raise Exception("flatten disabled by env")
+            fw_name = self.persistent_dir.name
+            nested_dir = self.persistent_dir / fw_name
+            if nested_dir.exists() and nested_dir.is_dir():
+                logger.info(f"Detected nested vectordb directory at {nested_dir}. Migrating contents up to {self.persistent_dir} (will overwrite conflicts)...")
+
+                # Detect if there's an extra UUID-like level and flatten one more level
+                source_dir = nested_dir
+                try:
+                    children = list(source_dir.iterdir())
+                    files = [c for c in children if c.is_file()]
+                    dirs = [c for c in children if c.is_dir()]
+                    if not files and len(dirs) == 1:
+                        inner = dirs[0]
+                        # Heuristic: inner looks like a Chroma store (contains chroma.sqlite3 or index-like dirs)
+                        inner_children = list(inner.iterdir())
+                        if any((ic.is_file() and ic.name == "chroma.sqlite3") or (ic.is_dir() and (ic.name in ("index", "collections", "datasets") or ic.name.startswith("index"))) for ic in inner_children):
+                            logger.info(f"Flattening extra inner level {inner} into {self.persistent_dir}")
+                            source_dir = inner
+                except Exception as _e:
+                    logger.debug(f"Could not analyze nested dir structure for flattening: {_e}")
+
+                for child in source_dir.iterdir():
+                    target = self.persistent_dir / child.name
+                    try:
+                        if child.is_dir():
+                            if target.exists():
+                                if target.is_dir():
+                                    shutil.rmtree(target)
+                                else:
+                                    try:
+                                        target.unlink(missing_ok=True)
+                                    except TypeError:
+                                        if target.exists():
+                                            target.unlink()
+                            shutil.move(str(child), str(target))
+                        else:
+                            target.parent.mkdir(parents=True, exist_ok=True)
+                            if target.exists() and target.is_file():
+                                try:
+                                    target.unlink(missing_ok=True)
+                                except TypeError:
+                                    if target.exists():
+                                        target.unlink()
+                            shutil.move(str(child), str(target))
+                    except Exception as move_err:
+                        logger.warning(f"Failed moving {child} -> {target}: {move_err}")
+                # Attempt to remove the now-empty directories
+                try:
+                    if source_dir != nested_dir:
+                        source_dir.rmdir()
+                except Exception as rm_inner_err:
+                    logger.debug(f"Could not remove inner dir {source_dir}: {rm_inner_err}")
+                try:
+                    nested_dir.rmdir()
+                except Exception as rm_err:
+                    logger.debug(f"Could not remove nested dir {nested_dir}: {rm_err}")
+        except Exception as e:
+            logger.warning(f"Vectordb path normalization skipped due to error: {e}")
         
         # Get embedding configuration
         embedding_config = get_vertex_embedding_config()
@@ -79,7 +144,7 @@ class VectorStore:
         self._get_or_create_collection()
         
         logger.info(f"VectorStore initialized with collection '{collection_name}' at {persistent_dir}")
-    
+
     def _get_or_create_collection(self):
         """
         Get or create ChromaDB collection.

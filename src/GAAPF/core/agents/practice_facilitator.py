@@ -7,19 +7,6 @@ from langchain_core.language_models.base import BaseLanguageModel
 from langchain_core.tools import BaseTool
 from ...prompts.practice_facilitator import generate_system_prompt
 
-# Enhanced imports for adaptive learning (silent fallback if unavailable)
-try:
-    from ..learning.bayesian_kt import BayesianKnowledgeTracker
-    from ..gamification.achievement_system import AchievementSystem
-    from ..config.adaptive_config import AdaptiveConfigManager
-    ENHANCED_FEATURES_AVAILABLE = True
-except ImportError:
-    BayesianKnowledgeTracker = None
-    AchievementSystem = None
-    AdaptiveConfigManager = None
-    ENHANCED_FEATURES_AVAILABLE = False
-
-# Setup logging (avoid duplicate handlers)
 if not logging.getLogger().handlers:
     logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -105,38 +92,6 @@ class PracticeFacilitatorAgent(SpecializedAgent):
         self.bkt_tracker = None
         self.achievement_system = None
         self.adaptive_config_manager = None
-        
-        if ENHANCED_FEATURES_AVAILABLE:
-            try:
-                # Initialize BKT tracker
-                if BayesianKnowledgeTracker:
-                    self.bkt_tracker = BayesianKnowledgeTracker(
-                        user_id="default",  # Will be updated per user
-                        storage_path=memory_path.parent / "bkt_data" if memory_path else None
-                    )
-                    if self.is_logging:
-                        logger.info("BKT tracker initialized for practice facilitator")
-                
-                # Initialize achievement system
-                if AchievementSystem:
-                    self.achievement_system = AchievementSystem(
-                        storage_path=memory_path.parent / "achievements" if memory_path else None
-                    )
-                    if self.is_logging:
-                        logger.info("Achievement system initialized for practice facilitator")
-                
-                # Initialize adaptive config manager
-                if AdaptiveConfigManager:
-                    self.adaptive_config_manager = AdaptiveConfigManager(
-                        storage_path=memory_path.parent / "adaptive_config" if memory_path else None
-                    )
-                    if self.is_logging:
-                        logger.info("Adaptive config manager initialized for practice facilitator")
-                        
-            except Exception as e:
-                if self.is_logging:
-                    logger.warning(f"Failed to initialize enhanced features: {e}")
-        
         if self.is_logging:
             logger.info(f"Initialized PracticeFacilitatorAgent with config: {self.config}")
     
@@ -149,7 +104,21 @@ class PracticeFacilitatorAgent(SpecializedAgent):
         str
             System prompt for the agent
         """
-        return generate_system_prompt(self.config)
+        base_prompt = generate_system_prompt(self.config)
+        try:
+            if learning_context and learning_context.get("study_mode"):
+                addback = learning_context.get("soc_addback") or []
+                addback_str = ("\n- Incorporate these add-back tips: " + ", ".join(addback[:5])) if addback else ""
+                preface = (
+                    "SOCRATIC STUDY MODE:\n"
+                    "- Begin with 1-2 targeted Socratic questions (each on its own line, ending with '?').\n"
+                    "- Avoid giving direct answers upfront; guide discovery.\n"
+                    "- Conclude with ONE concrete next step the learner can take right now." + addback_str + "\n\n"
+                )
+                return preface + base_prompt
+        except Exception:
+            pass
+        return base_prompt
     
     def _enhance_query_with_context(self, query: str, learning_context: Dict) -> str:
         """

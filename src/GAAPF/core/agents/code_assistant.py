@@ -97,10 +97,11 @@ class CodeAssistantAgent(SpecializedAgent):
         
         # Enhanced capabilities for Phase 4
         self.code_validation_enabled = True
-        self.auto_execution_enabled = config.get("auto_execution", False)
+        # Disable any automatic execution in main flow
+        self.auto_execution_enabled = False
         self.framework_integration_enabled = True
-        # Phase 3.3: Validation mode (light checks, no execution)
-        self.validation_mode = bool(config.get("validation_mode", False))
+        # Force light validation mode (no execution)
+        self.validation_mode = True
         
         # Initialize Retriever for RAG capabilities
         self.retriever = None
@@ -394,7 +395,8 @@ class CodeAssistantAgent(SpecializedAgent):
         response = await self.llm.ainvoke(prompt)
         
         # This is a simplified extraction. A real implementation would parse the response more robustly.
-        code_content = response.content
+        # Safe content extraction
+        code_content = getattr(response, 'content', str(response))
         return {
             "code": code_content,
             "explanation": "This is a generated explanation for the code.",
@@ -415,6 +417,21 @@ class CodeAssistantAgent(SpecializedAgent):
         str
             System prompt for the agent with injected documentation context
         """
+        # Socratic preface for Study Mode
+        soc_prefix = ""
+        try:
+            if learning_context and learning_context.get("study_mode"):
+                addback = learning_context.get("soc_addback") or []
+                addback_str = ("\n- Incorporate these add-back tips: " + ", ".join(addback[:5])) if addback else ""
+                soc_prefix = (
+                    "SOCRATIC STUDY MODE:\n"
+                    "- Begin with 1-2 targeted Socratic questions (each on its own line, ending with '?').\n"
+                    "- Avoid giving direct answers upfront; guide discovery.\n"
+                    "- Conclude with ONE concrete next step the learner can take right now." + addback_str + "\n\n"
+                )
+        except Exception:
+            pass
+        
         # Get base system prompt
         base_prompt = generate_system_prompt(self.config, learning_context)
         
@@ -425,7 +442,7 @@ class CodeAssistantAgent(SpecializedAgent):
             if framework_name and self._initialize_retriever_for_framework(framework_name):
                 # Get some general documentation for the framework
                 general_query = f"introduction overview getting started {framework_name}"
-                relevant_docs = self.retriever.retrieve_docs(general_query, k=2) if self.retriever else []
+                relevant_docs = self.retriever.retrieve_docs(general_query, k=4) if self.retriever else []
                 
                 if relevant_docs:
                     # Format documentation context
@@ -436,9 +453,15 @@ class CodeAssistantAgent(SpecializedAgent):
                         # Get metadata for source attribution
                         metadata = doc.get('metadata', {}) if isinstance(doc, dict) else {}
                         source = metadata.get('source', f'Doc {i}')
+                        # Prefer canonical code blocks where available
+                        if (metadata.get('type') == 'code_block'):
+                            lang = metadata.get('language') or ''
+                            # Keep code block intact
+                            doc_content = f"```{lang}\n{doc_text}\n```"
+                        else:
+                            # Truncate long documents to fit in prompt
+                            doc_content = doc_text[:400] + "..." if len(doc_text) > 400 else doc_text
                         
-                        # Truncate long documents to fit in prompt
-                        doc_content = doc_text[:400] + "..." if len(doc_text) > 400 else doc_text
                         context_parts.append(f"**Source: {source}**\n{doc_content}")
                     
                     context_text = "\n\n".join(context_parts)
@@ -457,7 +480,7 @@ The following documentation snippets are available for reference when providing 
                     if self.is_logging:
                         logger.info(f"Enhanced system prompt with {len(relevant_docs)} documentation snippets for {framework_name}")
                     
-                    return enhanced_prompt
+                    return soc_prefix + enhanced_prompt
             
         except Exception as e:
             if self.is_logging:
@@ -482,13 +505,14 @@ The following documentation snippets are available for reference when providing 
         """
         try:
             if framework_name != self.current_framework:
-                # Create VectorStore path for the framework
-                vs_path = f"data/frameworks/vectordb/{framework_name}/{framework_name}"
+                # Create VectorStore path for the framework (must match ingestion layout)
+                # Ingestion stores per-framework at: data/frameworks/vectordb/{framework}
+                vs_path = f"data/frameworks/vectordb/{framework_name}"
                 collection_name = f"framework_docs_{framework_name}"
                 
                 # Initialize VectorStore with consistent embedding model
                 vector_store = VectorStore(
-                    persistent_dir=vs_path, 
+                    persistent_dir=vs_path,
                     collection_name=collection_name,
                     embedding_model="gemini-embedding-001"
                 )
@@ -498,11 +522,11 @@ The following documentation snippets are available for reference when providing 
                     self.retriever = Retriever(vector_store)
                     self.current_framework = framework_name
                     if self.is_logging:
-                        logger.info(f"Initialized Retriever for framework: {framework_name}")
+                        logger.info(f"Initialized Retriever for framework: {framework_name} (path={vs_path})")
                     return True
                 else:
                     if self.is_logging:
-                        logger.warning(f"VectorStore for {framework_name} is empty")
+                        logger.warning(f"VectorStore for {framework_name} is empty at {vs_path}")
                     return False
             return True
             
@@ -705,6 +729,124 @@ The following documentation is specifically relevant to your question:
             pass
 
         return processed
+
+    async def ainvoke(self, query: str, *args, **kwargs) -> Any:
+        """Override to enforce RAG-before-generate and optionally delegate code creation to generator."""
+        learning_context: Dict = kwargs.get("learning_context", kwargs.get("context", {})) or {}
+
+        # Persist user message (align with base)
+        try:
+            if getattr(self, "memory", None):
+                framework_id = learning_context.get("framework")
+                uid = kwargs.get("user_id") or getattr(self, "_user_id", None) or "unknown_user"
+                self.memory.append_chat_message(uid, role="user", content=query, framework=framework_id)
+                self.save_memory(query, user_id=uid)
+        except Exception:
+            pass
+
+        # Ensure retriever is available for current framework (for prompt grounding)
+        try:
+            fw_name = learning_context.get("framework_config", {}).get("name", "").lower()
+            if fw_name:
+                self._initialize_retriever_for_framework(fw_name)
+        except Exception:
+            pass
+
+        # Heuristic: if the user intends to generate/build code, delegate to generator when available
+        lower_q = (query or "").lower()
+        intents = [
+            "generate code", "write code", "create file", "build example", "minimal example",
+            "implement", "scaffold", "create project", "code sample"
+        ]
+        should_generate = any(k in lower_q for k in intents)
+
+        if should_generate:
+            try:
+                from .code_generator import CodeGenerationAgent
+                # Use faster settings to avoid long validations/retries in interactive flows
+                gen = CodeGenerationAgent(
+                    self.llm,
+                    is_logging=self.is_logging,
+                    memory_path=getattr(self, "memory_path", None),
+                    max_retries=1,
+                    quality_threshold=0,
+                )
+                # Retrieve query-specific canonical code blocks to ground generation
+                appendix = ""
+                try:
+                    if self.retriever:
+                        docs = self.retriever.retrieve_docs(query, k=5)
+                        code_blocks = [d for d in docs if isinstance(d, dict) and (d.get("metadata", {}) or {}).get("type") == "code_block"]
+                        if code_blocks:
+                            parts = []
+                            for blk in code_blocks[:2]:
+                                lang = (blk.get("metadata", {}) or {}).get("language") or ""
+                                text = blk.get("text", "") or ""
+                                parts.append(f"```{lang}\n{text}\n```")
+                            appendix = "\n\nUse the canonical code patterns below as authoritative syntax references.\n" + "\n\n".join(parts)
+                except Exception:
+                    pass
+                spec = query + appendix
+                # Pass skip_validation flag into the generator context
+                fast_ctx = dict(learning_context or {})
+                fast_ctx["skip_validation"] = True
+                result = await gen.ainvoke(
+                    spec,
+                    learning_context=fast_ctx,
+                    user_id=kwargs.get("user_id", "unknown_user"),
+                )
+                # Wrap into a concise message; avoid showing raw code inline here
+                if isinstance(result, dict):
+                    content = (
+                        f"Code generated. Quality: {result.get('quality_score', 0)}. "
+                        f"Tests passed: {bool(result.get('tests_passed'))}."
+                    )
+                    return {
+                        "content": content,
+                        "type": "code_result",
+                        "suggestions": [
+                            "Open generated files and run locally",
+                            "Ask to add tests or improve quality",
+                            "Request an explanation of the code",
+                        ],
+                        "execution": {
+                            "tests_passed": bool(result.get("tests_passed")),
+                            "quality_score": int(result.get("quality_score", 0)),
+                        },
+                        "progress": learning_context.get("session", {}).copy() if isinstance(learning_context.get("session"), dict) else None,
+                    }
+                return result
+            except Exception:
+                # Fall back to standard behavior if generator is unavailable
+                pass
+
+        # Heuristic: if the user intends to repair/fix code, delegate to repair agent when available
+        repair_intents = [
+            "repair", "fix bug", "fix", "patch", "apply patch", "apply diff",
+            "bug fix", "failing test", "lint error", "error in", "broken"
+        ]
+        should_repair = any(k in lower_q for k in repair_intents)
+
+        # Repair flow disabled in main run; continue with default behavior
+
+        # Default: use base behavior via system prompt with injected RAG context
+        try:
+            system_prompt = self._generate_system_prompt(learning_context)
+        except Exception:
+            system_prompt = None
+        if system_prompt:
+            try:
+                from langchain_core.messages import SystemMessage, HumanMessage
+                msgs = [SystemMessage(content=system_prompt), HumanMessage(content=query)]
+                if hasattr(self.llm, "ainvoke"):
+                    resp = await self.llm.ainvoke(msgs)
+                else:
+                    resp = self.llm.invoke(msgs)
+                return self._process_response(resp, learning_context)
+            except Exception:
+                pass
+        # Absolute fallback to base implementation if anything above fails
+        return await super().ainvoke(query, *args, **kwargs)
 
     def _write_code_files(self, code_blocks: List[Dict], learning_context: Dict) -> List[str]:
         """Write extracted code blocks to disk using the write_file tool.

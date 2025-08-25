@@ -202,7 +202,9 @@ class InstructorAgent(SpecializedAgent):
         if self.is_logging:
             logger.info("✅ InstructorAgent response generated successfully")
             
-        return {"response": response_message.content}
+        # Safe content extraction
+        response_content = getattr(response_message, 'content', str(response_message))
+        return {"response": response_content}
 
     def _generate_system_prompt(self, learning_context: Dict = None) -> str:
         """
@@ -222,7 +224,23 @@ class InstructorAgent(SpecializedAgent):
         if self.is_logging:
             logger.info("📝 Generating enhanced system prompt with learning context")
             
-        return generate_system_prompt(self.config, learning_context)
+        base_prompt = generate_system_prompt(self.config, learning_context)
+        # Prepend Socratic Study Mode guardrails
+        try:
+            if learning_context and learning_context.get("study_mode"):
+                addback = learning_context.get("soc_addback") or []
+                addback_str = ("\n- Incorporate these add-back tips: " + ", ".join(addback[:5])) if addback else ""
+                preface = (
+                    "SOCRATIC STUDY MODE:\n"
+                    "- Begin with 1-2 targeted Socratic questions (each on its own line, ending with '?').\n"
+                    "- Avoid giving direct answers upfront; guide discovery.\n"
+                    "- Conclude with ONE concrete next step the learner can take right now." + addback_str + "\n\n"
+                )
+                return preface + base_prompt
+        except Exception:
+            pass
+        
+        return base_prompt
 
     def _enhance_query_with_context(self, query: str, learning_context: Dict) -> str:
         """

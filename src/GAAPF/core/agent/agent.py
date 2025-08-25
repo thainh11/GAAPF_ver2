@@ -350,6 +350,7 @@ class Agent(AgentMeta):
                 "}\n"
                 "Let's say I don't know and suggest where to search if you are unsure the answer.\n"
                 "Not make up anything.\n"
+                "\n"
             )
             
             if self.is_logging:
@@ -463,7 +464,9 @@ class Agent(AgentMeta):
                         yield chunk
 
                     # After streaming is complete, process tool data
-                    tool_data_str = self.tools_manager.extract_tool(full_content.content)
+                    # Safe content extraction
+                    content_text = getattr(full_content, 'content', str(full_content))
+                    tool_data_str = self.tools_manager.extract_tool(content_text)
                     if (tool_data_str is None) or (tool_data_str == "{}"):
                         if self.is_logging:
                             logger.info("✅ No tool call detected, returning direct response")
@@ -499,11 +502,12 @@ class Agent(AgentMeta):
                         
                         message = self.llm.invoke(prompt_tool)
                         
-                        # Enhanced tool message handling
+                        # Enhanced tool message handling with safe content access
+                        message_content = getattr(message, 'content', str(message))
                         if hasattr(tool_message, 'content'):
-                            tool_message.content = "\n" + message.content
+                            tool_message.content = "\n" + message_content
                         else:
-                            tool_message = ToolMessage(content=message.content, tool_call_id="stream_tool_call")
+                            tool_message = ToolMessage(content=message_content, tool_call_id="stream_tool_call")
 
                         if self.memory and is_save_memory:
                             try:
@@ -694,8 +698,9 @@ class Agent(AgentMeta):
                     # Enhanced LLM call with tool processing
                     response = await self.llm.ainvoke(messages)
                     
-                    # Enhanced tool extraction and execution
-                    tool_data = self.tools_manager.extract_tool(response.content)
+                    # Enhanced tool extraction and execution with safe content access
+                    response_content = getattr(response, 'content', str(response))
+                    tool_data = self.tools_manager.extract_tool(response_content)
                     
                     if not tool_data or ("None" in tool_data) or (tool_data == "{}"):
                         if self.memory and is_save_memory:
@@ -703,7 +708,7 @@ class Agent(AgentMeta):
                                 # Append transcript of assistant reply
                                 try:
                                     framework_id = (learning_context or {}).get("framework")
-                                    self.memory.append_chat_message(self._user_id, role="assistant", content=response.content, framework=framework_id)
+                                    self.memory.append_chat_message(self._user_id, role="assistant", content=response_content, framework=framework_id)
                                 except Exception:
                                     pass
                                 self.save_memory(response, user_id=self._user_id)
@@ -746,18 +751,25 @@ class Agent(AgentMeta):
                         
                         message = await self.llm.ainvoke(prompt_tool)
                         
-                        # Enhanced response message creation
+                        # Enhanced response message creation with safe content access
+                        message_content = getattr(message, 'content', str(message))
                         if hasattr(tool_message, 'content'):
-                            tool_message.content = message.content
+                            tool_message.content = message_content
                         else:
-                            tool_message = AIMessage(content=message.content)
+                            tool_message = AIMessage(content=message_content)
                         
                         if self.memory and is_save_memory:
                             try:
                                 # Append transcript of tool response
                                 try:
                                     framework_id = (learning_context or {}).get("framework")
-                                    content_text = getattr(tool_message, 'content', str(tool_message))
+                                    # Safe content extraction
+                                    if hasattr(tool_message, 'content'):
+                                        content_text = tool_message.content
+                                    elif isinstance(tool_message, str):
+                                        content_text = tool_message
+                                    else:
+                                        content_text = str(tool_message)
                                     self.memory.append_chat_message(self._user_id, role="assistant", content=content_text, framework=framework_id)
                                 except Exception:
                                     pass
@@ -836,17 +848,19 @@ class Agent(AgentMeta):
                 if self.is_logging:
                     logger.info(f"✅ Saved string message to memory: {message[:100]}...")
             elif isinstance(message, AIMessage):
-                self.memory.save_short_term_memory(self.llm, message.content, user_id=user_id, agent_type=self._agent_type)
+                content = getattr(message, 'content', str(message))
+                self.memory.save_short_term_memory(self.llm, content, user_id=user_id, agent_type=self._agent_type)
                 if self.is_logging:
-                    logger.info(f"✅ Saved AI message to memory: {message.content[:100]}...")
+                    logger.info(f"✅ Saved AI message to memory: {content[:100]}...")
             elif hasattr(message, 'artifact') and isinstance(message.artifact, str):
                 self.memory.save_short_term_memory(self.llm, message.artifact, user_id=user_id, agent_type=self._agent_type)
                 if self.is_logging:
                     logger.info(f"✅ Saved tool artifact to memory: {str(message.artifact)[:100]}...")
             elif hasattr(message, 'content'):
-                self.memory.save_short_term_memory(self.llm, message.content, user_id=user_id, agent_type=self._agent_type)
+                content = getattr(message, 'content', str(message))
+                self.memory.save_short_term_memory(self.llm, content, user_id=user_id, agent_type=self._agent_type)
                 if self.is_logging:
-                    logger.info(f"✅ Saved message content to memory: {message.content[:100]}...")
+                    logger.info(f"✅ Saved message content to memory: {content[:100]}...")
             else:
                 # Fallback for other types - convert to string
                 self.memory.save_short_term_memory(self.llm, str(message), user_id=user_id, agent_type=self._agent_type)

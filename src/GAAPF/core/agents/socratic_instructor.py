@@ -1,20 +1,8 @@
-"""
-Socratic Instructor Agent - Study Mode Implementation
-Extends InstructorAgent with Socratic questioning methodology based on OpenAI Study Mode principles.
-
-This agent implements the core Study Mode philosophy:
-1. Ask questions instead of giving direct answers
-2. Guide discovery through progressive questioning  
-3. Encourage active participation and critical thinking
-4. Provide hints when stuck, not solutions
-5. Foster curiosity and deeper understanding
-"""
-
 import logging
 import json
 from typing import Dict, List, Optional, Any, Tuple
 from collections import deque
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 from .instructor import InstructorAgent
 from ..tools.vector_store import VectorStore
 from pathlib import Path
@@ -143,6 +131,16 @@ class SocraticInstructorAgent(InstructorAgent):
         if hasattr(self, "compiled_graph"):
             del self.compiled_graph
 
+        # Ensure current user id preference mirrors base Agent behavior
+        try:
+            if learning_context and "user_profile" in learning_context:
+                profile = learning_context.get("user_profile") or {}
+                self._user_id = profile.get("user_id", user_id or "unknown_user")
+            else:
+                self._user_id = user_id or "unknown_user"
+        except Exception:
+            self._user_id = user_id or "unknown_user"
+
         study_mode = bool(learning_context and learning_context.get("study_mode"))
         if study_mode:
             # Produce concise Socratic response but still persist short-term memory like base class
@@ -151,8 +149,9 @@ class SocraticInstructorAgent(InstructorAgent):
             try:
                 if self.memory:
                     framework_id = context.get("framework")
-                    self.memory.append_chat_message(self._user_id or user_id, role="user", content=query, framework=framework_id)
-                    self.save_memory(query, user_id=self._user_id or user_id)
+                    uid = user_id or self._user_id or "unknown_user"
+                    self.memory.append_chat_message(uid, role="user", content=query, framework=framework_id)
+                    self.save_memory(query, user_id=uid)
             except Exception:
                 pass
 
@@ -164,8 +163,9 @@ class SocraticInstructorAgent(InstructorAgent):
                     framework_id = context.get("framework")
                     content = result.get("content", "") if isinstance(result, dict) else str(result)
                     if content:
-                        self.memory.append_chat_message(self._user_id or user_id, role="assistant", content=content, framework=framework_id)
-                        self.save_memory(content, user_id=self._user_id or user_id)
+                        uid = user_id or self._user_id or "unknown_user"
+                        self.memory.append_chat_message(uid, role="assistant", content=content, framework=framework_id)
+                        self.save_memory(content, user_id=uid)
             except Exception:
                 pass
 
@@ -261,9 +261,16 @@ class SocraticInstructorAgent(InstructorAgent):
         if filtered:
             socratic_questions = filtered
         
+        # Build next action and transition per template
+        try:
+            next_action, transition = self._build_next_action_and_transition(query_analysis, framework)
+        except Exception:
+            next_action, transition = None, None
+
         # Create structured Socratic response
         response_content = self.format_socratic_response(
-            socratic_questions, query, query_analysis, context
+            socratic_questions, query, query_analysis, context,
+            concise_answer=None, next_action=next_action, transition=transition
         )
         
         # Track progress
@@ -277,9 +284,28 @@ class SocraticInstructorAgent(InstructorAgent):
             "progress": self.user_progress.copy()
         }
 
-    # ──────────────────────────────────────────────────────────────
-    # Learning Path generation via RAG (no hardcoded steps)
-    # ──────────────────────────────────────────────────────────────
+    def _build_next_action_and_transition(self, analysis: Dict[str, Any], framework: str) -> Tuple[str, str]:
+        t = analysis.get("type")
+        if t == "problem_solving":
+            return (
+                f"Describe the very first step to build with {framework} in one sentence, then do it.",
+                "We’ll add the second step or a simple tool right after."
+            )
+        if t == "code_understanding":
+            return (
+                "Point to the single most important line and explain why in one sentence.",
+                "Then we’ll map each line to the overall goal."
+            )
+        if t == "concept_exploration":
+            return (
+                "Summarize the concept in your own words (1–2 sentences).",
+                "Next, we can compare it to a related concept or try a tiny example."
+            )
+        return (
+            "Pick one small goal (chatbot, RAG, or a single tool) to focus on first.",
+            "Then we’ll choose tools vs memory accordingly."
+        )
+
     async def _generate_learning_path_via_rag(self, query: str, context: Dict[str, Any]) -> Dict[str, Any]:
         framework = self._get_framework_from_context(context)
         level, goal = self._parse_quick_check_signals(query)
@@ -288,30 +314,37 @@ class SocraticInstructorAgent(InstructorAgent):
         # Retrieve reference snippets from local vector store
         results = await self._retrieve_docs_async(framework=framework, query=rag_query, top_k=6)
         if not results:
-            # LLM-first fallback: let the LLM synthesize a plan from curriculum summary and user context
+            # LLM-first fallback: let the LLM synthesize a plan from curriculum summary and user context, with history in system
             curriculum_summary = (context or {}).get("curriculum_summary", "")
             level = (context or {}).get("user_level") or "beginner"
             goal_text = (self._parse_quick_check_signals(query)[1] or query)
+            history_context = self._build_history_context(context)
+            history_block = ("\n\nContext (Recent history):\n" + history_context) if history_context else ""
             system = (
                 "You are a concise learning coach. Create a short, actionable Learning Path (3-5 steps) "
                 "for the given framework and learner goal. Use ONLY the provided curriculum summary and context. "
-                "Avoid hallucinations. Keep steps crisp and practical."
-            )
-            user = (
+                "Avoid hallucinations. Keep steps crisp and practical. Do not include sources.\n\n"
                 f"Framework: {framework}\n"
                 f"Learner level: {level}\n"
                 f"Goal: {goal_text}\n\n"
-                f"Curriculum summary (bullet list):\n{curriculum_summary or '- (no summary)'}\n\n"
+                f"Curriculum summary (bullet list):\n{curriculum_summary or '- (no summary)'}\n"
+                f"{history_block}\n"
                 "Format:\n**Recommended Learning Path**\n- Step 1: ...\n- Step 2: ...\n- Step 3: ...\n(+ optional Step 4-5)"
             )
             try:
                 if hasattr(self.llm, "ainvoke"):
-                    resp = await self.llm.ainvoke([HumanMessage(content=system), HumanMessage(content=user)])
+                    resp = await self.llm.ainvoke([SystemMessage(content=system), HumanMessage(content=query)])
                 else:
-                    resp = self.llm.invoke([HumanMessage(content=system), HumanMessage(content=user)])
+                    resp = self.llm.invoke([SystemMessage(content=system), HumanMessage(content=query)])
                 content = getattr(resp, "content", str(resp))
             except Exception:
                 content = "**Recommended Learning Path**\n- Step 1: Core concepts\n- Step 2: Minimal example\n- Step 3: Tools\n- Step 4: Memory"
+
+            # sanitize possible Sources blocks
+            try:
+                content = "\n\n".join([p for p in content.split("\n\n") if not p.strip().lower().startswith("sources:")]).strip()
+            except Exception:
+                pass
 
             return {
                 "content": content,
@@ -326,33 +359,38 @@ class SocraticInstructorAgent(InstructorAgent):
             }
 
         citations_block, context_block = self._format_retrieved_context(results)
+        history_context = self._build_history_context(context)
+        history_block = ("\n\nContext (Recent history):\n" + history_context) if history_context else ""
+        curriculum_summary = (context or {}).get("curriculum_summary", "")
         system = (
             "You are a concise learning coach. Create a short, actionable Learning Path (3-5 steps) for the given framework and goal. "
-            "Constrain yourself to ONLY use the provided reference snippets. Each step must be grounded by citations [n] that map to the sources list. "
-            "Avoid hallucinations. Keep it crisp like a quick plan in bullet points."
-        )
-        user = (
+            "Constrain yourself to ONLY use the provided reference snippets and curriculum summary. Do not include sources.\n\n"
             f"Framework: {framework}\n"
             f"Learner level: {level or 'beginner'}\n"
             f"Goal: {goal or query}\n\n"
+            f"Curriculum summary:\n{curriculum_summary or '- (no summary)'}\n"
+            f"{history_block}\n\n"
             f"References:\n{context_block}\n\n"
             "Format strictly:\n"
             "**Recommended Learning Path**\n\n"
-            "- Step 1: ... [1]\n"
-            "- Step 2: ... [2]\n"
-            "- Step 3: ... [3]\n"
-            "(+ optional Step 4-5 if needed)\n\n"
-            "Sources:\n"
-            f"{citations_block}"
+            "- Step 1: ...\n"
+            "- Step 2: ...\n"
+            "- Step 3: ...\n"
+            "(+ optional Step 4-5 if needed)"
         )
 
         try:
             # Use chat-style inputs to encourage structured output
             if hasattr(self.llm, "ainvoke"):
-                resp = await self.llm.ainvoke([HumanMessage(content=system), HumanMessage(content=user)])
+                resp = await self.llm.ainvoke([SystemMessage(content=system), HumanMessage(content=query)])
             else:
-                resp = self.llm.invoke([HumanMessage(content=system), HumanMessage(content=user)])
+                resp = self.llm.invoke([SystemMessage(content=system), HumanMessage(content=query)])
             content = getattr(resp, "content", str(resp))
+            # sanitize possible Sources blocks
+            try:
+                content = "\n\n".join([p for p in content.split("\n\n") if not p.strip().lower().startswith("sources:")]).strip()
+            except Exception:
+                pass
         except Exception:
             content = (
                 "Here is a concise Learning Path to get you started. If you want, I can also fetch official docs for citations.\n\n"
@@ -560,27 +598,39 @@ class SocraticInstructorAgent(InstructorAgent):
         """
         Use LLM to generate contextual Socratic questions
         """
-        history_block = ("\nRecent history:\n" + history_context) if history_context else ""
-        socratic_prompt = f"""
-You are a Socratic tutor teaching {framework} to a {user_level} student.
-Student asked: "{query}"
-{history_block}
+        history_block = ("\n\nContext (Recent history):\n" + history_context) if history_context else ""
+        system_prompt = f"""
+You are a Socratic tutor for {framework}, adapting to a {user_level} learner.
 
-Task: Ask 2-3 short follow-up questions that build directly on the recent context (if any).
-Constraints:
-- Do NOT repeat generic onboarding questions.
-- Keep each question single-sentence, concise.
-- Match user's level: {user_level}.
-- Focus type: {analysis.get('type', 'concept_exploration')}
-- Output only questions as a numbered list.
+GOALS
+- Encourage active participation through strategic questions.
+- Build from prior knowledge toward application in small steps.
+
+STYLE
+- Friendly, concise, supportive; use emojis sparingly (🔹, ✅).
+- Default to English unless the user specifies otherwise.
+- Do not reveal chain-of-thought; no explanations, no answers.
+
+TASK
+Ask 2–3 single-sentence follow-up questions that build directly on the student's message and the recent context.
+
+CONSTRAINTS
+- No greetings or prefaces.
+- Output only questions as a numbered list (1., 2., 3.).
+- Avoid generic onboarding if we've already started; be specific to the query.
+- Match level: {user_level}.
+- Focus type: {analysis.get('type', 'concept_exploration')}.
+{history_block}
 """
+
+        user_prompt = query
         
         try:
             # Try async invoke first, fallback to sync
             if hasattr(self.llm, 'ainvoke'):
-                response = await self.llm.ainvoke(socratic_prompt)
+                response = await self.llm.ainvoke([SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)])
             else:
-                response = self.llm.invoke(socratic_prompt)
+                response = self.llm.invoke([SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)])
             
             # Handle both string responses and objects with .content attribute
             if hasattr(response, 'content'):
@@ -606,6 +656,20 @@ Constraints:
                 return None
             recent = self.memory.get_recent_chat(user_id=user_id, framework=framework, k=6) or []
             if not recent:
+                # Fallback to last_exchange if transcript empty
+                try:
+                    last = (session or {}).get("last_exchange") or {}
+                    if last and (last.get("user") or last.get("assistant")):
+                        user = (last.get("user") or "").strip()[:150]
+                        assistant = (last.get("assistant") or "").strip()[:150]
+                        lines = []
+                        if user:
+                            lines.append(f"- User: {user}")
+                        if assistant:
+                            lines.append(f"- AI: {assistant}")
+                        return "\n".join(lines) if lines else None
+                except Exception:
+                    pass
                 return None
             lines: List[str] = []
             for item in recent[-6:]:
@@ -656,7 +720,10 @@ Constraints:
         )
 
         try:
-            resp = await self.llm.ainvoke(prompt) if hasattr(self.llm, "ainvoke") else self.llm.invoke(prompt)
+            if hasattr(self.llm, "ainvoke"):
+                resp = await self.llm.ainvoke(prompt)
+            else:
+                resp = self.llm.invoke(prompt)
             text = getattr(resp, "content", str(resp))
             result = {"type": "onboarding", "confidence": 0.5}
             # Try parse JSON
@@ -712,21 +779,36 @@ Constraints:
         else:  # build_agent
             stage_directive = "Confirm readiness to build a small agent and clarify minimal requirements."
 
-        prompt = f"""
-You are a Socratic tutor. Framework: {framework}. User level: {user_level}. Language: en.
-User message: "{query}"
+        # Build history context into system prompt (user prompt stays raw)
+        try:
+            history_context = self._build_history_context({"framework": framework, **(context or {})})
+            history_block = ("\n\nContext (Recent history):\n" + history_context) if history_context else ""
+        except Exception:
+            history_block = ""
 
-Task: Ask 2-3 short onboarding questions for the stage: {onboarding_stage}.
+        system_prompt = f"""
+You are a Socratic tutor. Framework: {framework}. User level: {user_level}.
+
+STYLE
+- Friendly, concise, supportive; use emojis sparingly (🔹, ✅).
+- Default to English unless the user specifies otherwise.
+- Do not reveal chain-of-thought; no explanations, no answers.
+
+TASK
+Ask 2–3 short onboarding questions for the stage: {onboarding_stage}.
 {stage_directive}
-Constraints:
-- No explanations, no answers. Only questions.
-- Single-sentence per question; concise, in English.
-- If helpful, mention the framework by name once.
-Output: numbered list of 2-3 questions only.
+
+CONSTRAINTS
+- Questions only; single sentence each; numbered list (1., 2., 3.).
+- Be concrete and relevant to the user's message.
+- Mention the framework by name at most once if helpful.
+{history_block}
 """
 
+        user_prompt = query
+
         try:
-            resp = await self.llm.ainvoke(prompt) if hasattr(self.llm, "ainvoke") else self.llm.invoke(prompt)
+            resp = await self.llm.ainvoke([SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)]) if hasattr(self.llm, "ainvoke") else self.llm.invoke([SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)])
             text = getattr(resp, "content", str(resp))
             questions = self.extract_questions_from_llm_response(text)
             # Mix 1 seed question from config if present
@@ -795,27 +877,57 @@ Output: numbered list of 2-3 questions only.
         questions: List[str],
         original_query: str,
         analysis: Dict[str, Any],
-        context: Dict[str, Any]
+        context: Dict[str, Any],
+        concise_answer: Optional[str] = None,
+        next_action: Optional[str] = None,
+        transition: Optional[str] = None,
     ) -> str:
         """
-        Concise Socratic response: 2–3 questions, minimal framing, optional 1-line hint.
+        Concise Socratic response: Positive opening → 2–3 questions → optional 1-line hint →
+        Actionable next step → Transition bridge.
         """
-        output_lines: List[str] = ["🤔 Let's think together:"]
+        output_lines: List[str] = ["🎉 Great question! Let's think together:"]
+
+        # Optional brief direct answer (≤3 sentences) before questions
+        if concise_answer:
+            brief = concise_answer.strip()
+            if brief:
+                output_lines.append(f"Brief answer: {brief}")
+
         # Limit to top 3 concise questions
-        for index, question in enumerate(questions[:3], start=1):
-            output_lines.append(f"{index}. {question}")
+        top_qs = [q for q in questions[:3] if q]
+        if top_qs:
+            output_lines.append("\n".join([f"{i+1}. {q}" for i, q in enumerate(top_qs)]))
 
         # One-line hint only if scaffolding is needed
         if analysis.get("requires_scaffolding", False):
             if analysis.get("type") == "problem_solving":
-                output_lines.append("Hint: break the first step down and try it immediately.")
+                output_lines.append("💡 Hint: Try to isolate the very first step and attempt it immediately.")
             elif analysis.get("type") == "concept_exploration":
-                output_lines.append("Hint: start from what you already know about the concept.")
+                output_lines.append("💡 Hint: Start from what you already know about the concept.")
             else:
-                output_lines.append("Hint: consider pros and cons of each direction.")
+                output_lines.append("💡 Hint: Consider pros and cons of each direction.")
+
+        # Actionable next step (immediate application)
+        if next_action:
+            output_lines.append(f"🧪 Action: {next_action}")
+
+        # Transition bridge to next concept
+        if transition:
+            output_lines.append(f"🔄 Next: {transition}")
+
+        # If judge addback guidance is present in context, lightly reinforce in 1 line
+        try:
+            addback = context.get("soc_addback") or []
+            if addback:
+                tip = str(addback[-1])[:120]
+                if tip:
+                    output_lines.append(f"Coach tip: {tip}")
+        except Exception:
+            pass
 
         # Hard cap to keep responses short
-        content = "\n\n".join([output_lines[0], "\n".join(output_lines[1:])]).strip()
+        content = "\n\n".join([output_lines[0], "\n\n".join(output_lines[1:])]).strip()
         return content[:600]
     
     def generate_follow_up_suggestions(self, analysis: Dict[str, Any]) -> List[str]:

@@ -7,7 +7,7 @@ from typing import Dict, Any, List
 import streamlit as st
 
 # Ensure project src path is available for imports
-PROJECT_ROOT = Path(__file__).resolve().parents[3]  # .../vinagent-main
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 SRC_PATH = PROJECT_ROOT / "src"
 if str(SRC_PATH) not in sys.path:
     sys.path.insert(0, str(SRC_PATH))
@@ -24,6 +24,7 @@ from GAAPF.core.agents.code_assistant import CodeAssistantAgent
 from GAAPF.core.agents.practice_facilitator import PracticeFacilitatorAgent
 from GAAPF.core.agents.socratic_instructor import SocraticInstructorAgent
 from GAAPF.core.tools.framework_collector import FrameworkCollector
+from GAAPF.core.agents.code_generator import CodeGenerationAgent
 
 # Vertex AI LLM
 from langchain_google_vertexai import ChatVertexAI
@@ -70,12 +71,17 @@ def init_llm():
 def build_agents(llm, framework: str):
     """Create per-framework agents with shared memory file path."""
     mem_file = Path(f"templates/memory_{framework}.json")
-    return {
+    agents = {
         "instructor": InstructorAgent(llm, is_logging=True, memory_path=mem_file),
         "code_assistant": CodeAssistantAgent(llm, is_logging=True, memory_path=mem_file),
         "practice": PracticeFacilitatorAgent(llm, is_logging=True, memory_path=mem_file),
         "socratic_instructor": SocraticInstructorAgent(llm, is_logging=True, memory_path=mem_file),
     }
+    try:
+        agents["code_generator"] = CodeGenerationAgent(llm, is_logging=True, memory_path=mem_file)
+    except Exception:
+        pass
+    return agents
 
 
 def ensure_framework_ingested(framework: str):
@@ -126,15 +132,51 @@ with st.sidebar:
         if st.session_state.get("framework", "langchain") in FRAMEWORKS else 0,
     )
 
-    # Study mode toggle
-    study_mode = st.toggle("Enable Study Mode (Socratic)", value=st.session_state.get("study_mode", True))
+    # Study Mode: mặc định bật, không hiển thị toggle
+    study_mode = True
 
     # Clear chat button
     if st.button("Clear chat"):
         st.session_state["messages"] = []
 
     st.markdown("---")
+    # Vertex AI notice (không hiển thị model/project/location)
     st.caption("Vertex AI is used as the LLM provider. Configure via environment variables.")
+
+    # Help section
+    with st.expander("Help", expanded=False):
+        st.markdown(
+            """
+            Cách sử dụng:
+            - Chọn framework bạn muốn học.
+            - Nhập câu hỏi ở khung chat phía dưới.
+            - Bấm "Clear chat" để xóa lịch sử hội thoại.
+
+            Chế độ học:
+            - Study Mode (Socratic) mặc định bật: Hướng dẫn bằng câu hỏi, gợi ý để bạn tự khám phá.
+
+            Lệnh (CLI tham khảo):
+            - /help, /history, /agents, /tools (không cần trong web UI; cứ hỏi bằng ngôn ngữ tự nhiên).
+
+            Frameworks:
+            - LangChain: Dàn dựng workflow LLM và công cụ.
+            - LangGraph: Điều khiển LLM dạng đồ thị.
+            - CrewAI: Đa agent cộng tác theo nhiệm vụ.
+            - AutoGen: Đa agent cho hội thoại và tool phức tạp.
+            """
+        )
+
+    # Session info
+    with st.expander("Session Info", expanded=False):
+        _msg_count = len(st.session_state.get("messages", []))
+        _using_vertex = isinstance(st.session_state.get("llm"), ChatVertexAI)
+        st.write({
+            "user_id": st.session_state.get("user_id", "default"),
+            "framework": current_framework,
+            "study_mode": True,
+            "messages": _msg_count,
+            "llm_provider": "Vertex AI" if _using_vertex else "Mock LLM",
+        })
 
 # Initialize LLM and Hub once
 if "llm" not in st.session_state:
@@ -160,12 +202,9 @@ if ("hub" not in st.session_state) or framework_changed:
     st.session_state["agents"] = agents
     st.session_state["framework"] = current_framework
 
-# Study mode setting
-st.session_state["study_mode"] = study_mode
-if study_mode:
-    st.session_state["hub"].enable_study_mode()
-else:
-    st.session_state["hub"].disable_study_mode()
+# Study mode setting - luôn bật
+st.session_state["study_mode"] = True
+st.session_state["hub"].enable_study_mode()
 
 # Messages history
 if "messages" not in st.session_state:
@@ -196,20 +235,37 @@ if prompt:
     }
 
     with st.chat_message("assistant"):
-        with st.spinner("Thinking..."):
+        # Dải trạng thái (status actions)
+        with st.status("Đang xử lý truy vấn...", expanded=True) as status:
             try:
+                st.write("• Gửi tin nhắn đến hub...")
+                # Gọi hub xử lý (bước tốn thời gian)
                 resp = process_query_sync(st.session_state["hub"], prompt, context)
+
+                # Sau khi có kết quả, cập nhật thêm trạng thái
+                agent_used = resp.get("agent_used", "assistant")
+                st.write(f"• Agent xử lý: {agent_used}")
+                if resp.get("progress"):
+                    st.write("• Đã cập nhật tiến độ học tập cho phiên của bạn.")
+                st.write("• Tổng hợp và trình bày câu trả lời...")
+
+                # Cập nhật trạng thái cuối
+                status.update(label="Hoàn thành", state="complete", expanded=False)
+
+                # Hiển thị nội dung trả lời
                 content = resp.get("content", "")
                 st.markdown(content)
 
-                # Optional suggestions
+                # Gợi ý tiếp theo (nếu có)
                 suggestions: List[str] = resp.get("suggestions", []) or []
                 if suggestions:
                     with st.expander("Suggestions"):
                         for s in suggestions[:3]:
                             st.markdown(f"- {s}")
 
-                # Save assistant message
+                # Lưu tin nhắn assistant
                 st.session_state["messages"].append({"role": "assistant", "content": content})
             except Exception as e:
+                # Nếu lỗi, hiển thị trạng thái lỗi và chi tiết lỗi
+                status.update(label="Có lỗi xảy ra", state="error", expanded=True)
                 st.error(f"Error: {e}")
